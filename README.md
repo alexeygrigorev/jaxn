@@ -1,2 +1,3 @@
-# streaming_json_parser
-JSON parser for streamed output
+# Streaming JSON Parser
+
+A SAX-style JSON parser for processing incomplete JSON streams character-by-character.
