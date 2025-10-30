@@ -1,6 +1,6 @@
 """Test that on_field_start is called for array fields."""
 
-from streaming_json_parser import StreamingJSONParser, JSONParserHandler
+from jaxn import StreamingJSONParser, JSONParserHandler
 import json
 
 

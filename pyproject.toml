@@ -1,5 +1,5 @@
 [project]
-name = "streaming-json-parser"
+name = "jaxn"
 version = "0.1.0"
 description = "A SAX-style JSON parser for processing incomplete JSON streams"
 readme = "README.md"

@@ -13,7 +13,7 @@ This makes it easier to maintain state and organize parsing logic.
 
 import json
 import random
-from streaming_json_parser import StreamingJSONParser, JSONParserHandler
+from jaxn import StreamingJSONParser, JSONParserHandler
 
 
 def test_simple_json():
