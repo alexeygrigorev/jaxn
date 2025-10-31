@@ -1,0 +1,66 @@
+{
+    "found_answer": true,
+    "title": "Monitoring Data Drift in Production",
+    "sections": [
+        {
+            "heading": "Overview",
+            "content": "Monitoring data drift is crucial to understanding the health and performance of machine learning models in production. Data drift occurs when the statistical properties of the input data change, potentially leading to model decay. To effectively monitor for such changes, Evidently provides tools and methodologies to assess data drift and take appropriate actions when drift is detected.",
+            "references": [
+                {
+                    "title": "Data Drift",
+                    "filename": "metrics/preset_data_drift.mdx"
+                },
+                {
+                    "title": "How data drift detection works",
+                    "filename": "metrics/explainer_drift.mdx"
+                },
+                {
+                    "title": "Overview",
+                    "filename": "docs/platform/monitoring_overview.mdx"
+                }
+            ]
+        },
+        {
+            "heading": "Using Evidently for Data Drift Detection",
+            "content": "Evidently provides the `DataDriftPreset`, which allows for the evaluation of shifts in data distribution between two datasets: the current dataset and a reference dataset. Here’s how it works:\n\n1. **Setup**: You need two datasets - the current one (to evaluate) and the reference one (to compare against). Ensure that these datasets are non-empty.\n2. **Running Reports**: Create a report to calculate the drift metrics:\n    ```python\n    report = Report([\n        DataDriftPreset(),\n    ])\n    my_eval = report.run(current, ref)\n    ```\n3. **Evaluate Shift**: The `DataDriftPreset` checks for shifts in individual columns, overall dataset drift, and can detect if at least 50% of the columns have drifted.\n4. **Customizable Metrics**: You can customize drift detection methods and thresholds according to your needs. \n\n5. **Monitoring Setup**: This can be done within a batch job framework, allowing for periodic checks of incoming data and maintaining evaluations over time, which helps in decision-making regarding retraining or adjustments to the model.",
+            "references": [
+                {
+                    "title": "Creating Reports",
+                    "filename": "docs/library/report.mdx"
+                },
+                {
+                    "title": "Data Drift Preset",
+                    "filename": "metrics/preset_data_drift.mdx"
+                }
+            ]
+        },
+        {
+            "heading": "Best Practices",
+            "content": "- **Scheduled Monitoring**: Set up periodic evaluation jobs in your infrastructure, such as using Airflow, to ensure data is regularly monitored and evaluated for drift.\n- **Alert Systems**: Implement alerts based on drift detection metrics to quickly notify stakeholders of significant changes, allowing for timely responses.\n- **Data Quality Checks**: Regularly perform data quality checks as part of your monitoring strategy to ensure the integrity of the datasets being evaluated for drift.",
+            "references": [
+                {
+                    "title": "Batch monitoring",
+                    "filename": "docs/platform/monitoring_local_batch.mdx"
+                },
+                {
+                    "title": "Data and Prediction Drift Interpretation",
+                    "filename": "https://evidentlyai.com/blog/data-and-prediction-drift"
+                }
+            ]
+        }
+    ],
+    "references": [
+        {
+            "title": "Monitoring Data Drift in Evidently",
+            "filename": "metrics/preset_data_drift.mdx"
+        },
+        {
+            "title": "Evidently Drift Detection Methods",
+            "filename": "metrics/explainer_drift.mdx"
+        },
+        {
+            "title": "How to Handle Model Drift",
+            "filename": "https://evidentlyai.com/blog/ml-monitoring-data-drift-how-to-handle"
+        }
+    ]
+}
