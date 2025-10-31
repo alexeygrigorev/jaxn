@@ -18,8 +18,8 @@ class SearchResultHandler(JSONParserHandler):
             print(f"\n{'#' * level} References\n")
 
     def on_field_end(self, path, field_name, value, parsed_value=None):
-        if field_name == "title" and path == "/sections":
-            print(f"# {value}\n")
+        if field_name == "title" and path == "":
+                print(f"# {value}")
 
         elif field_name == "heading":
             print(f"\n\n## {value}\n")
