@@ -1,28 +1,9 @@
-<<<<<<< HEAD
-=======
-[project]
-name = "jaxn"
-version = "0.1.0"
-description = "A SAX-style JSON parser for processing incomplete JSON streams"
-readme = "README.md"
-requires-python = ">=3.8"
-authors = [
-    {name = "Alexey Grigorev"}
-]
-dependencies = []
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-]
-
->>>>>>> 5dc9ce2371bc7d534effe2ca8ed236524a334335
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "streaming-json-parser"
+name = "jaxn"
 description = "A SAX-style JSON parser for processing incomplete JSON streams"
 dynamic = ["version"]
 readme = "README.md"
@@ -59,15 +40,15 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/alexeygrigorev/streaming_json_parser"
-Repository = "https://github.com/alexeygrigorev/streaming_json_parser"
-Issues = "https://github.com/alexeygrigorev/streaming_json_parser/issues"
+Homepage = "https://github.com/alexeygrigorev/jaxn"
+Repository = "https://github.com/alexeygrigorev/jaxn"
+Issues = "https://github.com/alexeygrigorev/jaxn/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["streaming_json_parser"]
+packages = ["jaxn"]
 
 [tool.hatch.version]
-path = "streaming_json_parser/__version__.py"
+path = "jaxn/__version__.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
