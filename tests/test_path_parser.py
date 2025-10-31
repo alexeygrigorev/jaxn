@@ -1,6 +1,6 @@
 """Test the path-based parser functionality."""
 
-from streaming_json_parser import StreamingJSONParser, JSONParserHandler
+from jaxn import StreamingJSONParser, JSONParserHandler
 import json
 
 

@@ -1,6 +1,6 @@
 """Extensive test coverage for parsed values with complex nested structures."""
 
-from streaming_json_parser import StreamingJSONParser, JSONParserHandler
+from jaxn import StreamingJSONParser, JSONParserHandler
 import json
 import random
 
