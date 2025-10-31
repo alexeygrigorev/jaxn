@@ -6,7 +6,7 @@ from pathlib import Path
 from jaxn import StreamingJSONParser, JSONParserHandler
 import time
 
-json_message = Path('message.json', encoding='utf-8').read_text()
+json_message = Path('message.json').read_text(encoding='utf-8')
 
 # print(json_message)
 
