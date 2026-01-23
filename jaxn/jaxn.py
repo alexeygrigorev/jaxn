@@ -233,7 +233,7 @@ class StreamingJSONParser:
                     try:
                         parsed_field_name = json_module.loads('"' + self.buffer + '"')
                         self.current_field = parsed_field_name
-                    except Exception:
+                    except (json_module.JSONDecodeError, ValueError):
                         # If parsing fails, use the raw buffer
                         self.current_field = self.buffer
                     self.in_field_name = False
@@ -246,7 +246,7 @@ class StreamingJSONParser:
                     # Parse the string value to handle escape sequences
                     try:
                         parsed_value = json_module.loads('"' + self.buffer + '"')
-                    except Exception:
+                    except (json_module.JSONDecodeError, ValueError):
                         # If parsing fails, use the raw buffer
                         parsed_value = self.buffer
                     self.handler.on_field_end(path, field_name, self.buffer, parsed_value=parsed_value)
