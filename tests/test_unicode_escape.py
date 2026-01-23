@@ -100,21 +100,10 @@ def test_unicode_escape_mixed_with_regular_escapes():
 
 def test_unicode_escape_in_nested_structure():
     """Test unicode escapes in a nested JSON structure like the issue example."""
-    data = {
-        "found_answer": True,
-        "sections": [
-            {
-                "content": "Here\u2019s how it works:\n1. Setup\n2. Running"  # Using actual unicode char
-            }
-        ]
-    }
+    # Construct JSON string directly with escape sequences for predictability
+    json_str_unicode = '{"found_answer": true, "sections": [{"content": "Here\\u2019s how it works:\\n1. Setup\\n2. Running"}]}'
     
-    # When dumped to JSON, some unicode chars might be escaped
-    json_str = json.dumps(data)
-    
-    # Now replace the unicode char with escape sequence
-    json_str_unicode = json_str.replace('\u2019', '\\u2019')
-    
+    # Expected content with actual unicode character
     expected_content = "Here\u2019s how it works:\n1. Setup\n2. Running"
     
     class TestHandler(JSONParserHandler):
@@ -137,3 +126,31 @@ def test_unicode_escape_in_nested_structure():
     streamed = ''.join(handler.content_chunks)
     assert streamed == expected_content
     assert handler.content_value == expected_content
+
+
+def test_invalid_unicode_escape():
+    """Test handling of invalid unicode escape sequences."""
+    # Invalid unicode escapes should be kept as-is in the parsed value
+    json_str = '{"text": "Test\\u999Zinvalid"}'
+    
+    class TestHandler(JSONParserHandler):
+        def __init__(self):
+            self.chunks = []
+            self.final_value = None
+        
+        def on_value_chunk(self, path, field_name, chunk):
+            self.chunks.append(chunk)
+        
+        def on_field_end(self, path, field_name, value, parsed_value=None):
+            self.final_value = parsed_value
+    
+    handler = TestHandler()
+    parser = StreamingJSONParser(handler)
+    parser.parse_incremental(json_str)
+    
+    # The invalid escape should appear as literal text in streaming chunks
+    streamed = ''.join(handler.chunks)
+    assert '\\u999Z' in streamed
+    
+    # Since the JSON itself is invalid, the parsed_value may not decode correctly
+    # This is expected behavior - the parser handles it gracefully

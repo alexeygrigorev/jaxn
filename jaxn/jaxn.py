@@ -131,15 +131,16 @@ class StreamingJSONParser:
                             path = '/' + '/'.join([name for name, bracket in self.path_stack]) if self.path_stack else ''
                             self.handler.on_value_chunk(path, self.current_field, decoded_char)
                         except (ValueError, OverflowError):
-                            # Invalid unicode escape - send the literal characters
+                            # Invalid unicode escape - send the literal characters including backslash
                             path = '/' + '/'.join([name for name, bracket in self.path_stack]) if self.path_stack else ''
-                            for ch in ('u' + self.unicode_escape_buffer):
+                            for ch in ('\\u' + self.unicode_escape_buffer):
                                 self.handler.on_value_chunk(path, self.current_field, ch)
                         
                         # Reset unicode escape state
                         self.in_unicode_escape = False
                         self.unicode_escape_buffer = ""
                 elif self.in_field_name:
+                    # For field names, just accumulate in buffer - it will be parsed later
                     self.buffer += char
                     self.unicode_escape_buffer += char
                     
