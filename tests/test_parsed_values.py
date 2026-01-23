@@ -50,14 +50,18 @@ def test_parsed_value_with_escape_sequences():
     parser = StreamingJSONParser(handler)
     parser.parse_incremental(json_str)
     
-    # Both value and parsed_value come from the buffer (raw JSON string with escape sequences)
+    # The raw value contains escape sequences as they appear in JSON
     assert captured['raw'] == 'Line 1\\nLine 2\\tTabbed'
-    assert captured['parsed'] == 'Line 1\\nLine 2\\tTabbed'
-    assert captured['raw'] == captured['parsed']
     
-    # But on_value_chunk should have received the decoded characters
+    # The parsed_value should be the decoded string (actual newline and tab)
+    assert captured['parsed'] == 'Line 1\nLine 2\tTabbed'
+    
+    # on_value_chunk should have received the decoded characters
     reconstructed = ''.join(value_chunks)
     assert reconstructed == "Line 1\nLine 2\tTabbed"  # Actual newline and tab characters
+    
+    # The parsed value should match what we reconstructed from chunks
+    assert captured['parsed'] == reconstructed
     
     # Verify we can decode the buffer value to get the actual string
     assert json.loads(f'"{captured["raw"]}"') == reconstructed
