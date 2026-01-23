@@ -83,7 +83,7 @@ class SearchResultHandler(JSONParserHandler):
             print(f"\n\n## {value}\n")
         # Add spacing after content
         elif field_name == "content":
-            print("\n") 
+            print("\n")
 
     def on_value_chunk(self, path, field_name, chunk):
         # Stream content character by character for real-time display
