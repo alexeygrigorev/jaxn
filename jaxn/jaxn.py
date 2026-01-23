@@ -94,6 +94,8 @@ class StreamingJSONParser:
         self.bracket_stack = []  # Stack of just bracket types: e.g., ['{', '[', '{']
         self.pending_escape = ""  # Store backslash when we see it, to decode with next char
         self.object_start_pos = {}  # Track start position in recent_context for each object: {(path, field): position}
+        self.unicode_escape_buffer = ""  # Buffer for accumulating \uXXXX escape sequences
+        self.in_unicode_escape = False  # Track if we're currently reading a \uXXXX sequence
         
     def parse_incremental(self, delta):
         """
@@ -111,6 +113,45 @@ class StreamingJSONParser:
             self.recent_context += char
             if len(self.recent_context) > 50000:
                 self.recent_context = self.recent_context[-50000:]
+            
+            # Handle unicode escape sequence continuation (\uXXXX)
+            if self.in_unicode_escape:
+                if self.in_value:
+                    self.buffer += char
+                    self.unicode_escape_buffer += char
+                    
+                    # We need 4 hex digits after \u
+                    if len(self.unicode_escape_buffer) == 4:
+                        # Try to decode the unicode escape
+                        try:
+                            code_point = int(self.unicode_escape_buffer, 16)
+                            decoded_char = chr(code_point)
+                            
+                            # Send decoded character to handler
+                            path = '/' + '/'.join([name for name, bracket in self.path_stack]) if self.path_stack else ''
+                            self.handler.on_value_chunk(path, self.current_field, decoded_char)
+                        except (ValueError, OverflowError):
+                            # Invalid unicode escape - send the literal characters
+                            path = '/' + '/'.join([name for name, bracket in self.path_stack]) if self.path_stack else ''
+                            for ch in ('u' + self.unicode_escape_buffer):
+                                self.handler.on_value_chunk(path, self.current_field, ch)
+                        
+                        # Reset unicode escape state
+                        self.in_unicode_escape = False
+                        self.unicode_escape_buffer = ""
+                elif self.in_field_name:
+                    self.buffer += char
+                    self.unicode_escape_buffer += char
+                    
+                    if len(self.unicode_escape_buffer) == 4:
+                        # Reset state
+                        self.in_unicode_escape = False
+                        self.unicode_escape_buffer = ""
+                else:
+                    # Not in a string, shouldn't happen
+                    self.in_unicode_escape = False
+                    self.unicode_escape_buffer = ""
+                continue
             
             # Handle escape sequences
             if self.escape_next:
@@ -131,6 +172,16 @@ class StreamingJSONParser:
                         decoded_char = '"'
                     elif char == '/':
                         decoded_char = '/'
+                    elif char == 'u':
+                        # Start of unicode escape sequence \uXXXX
+                        self.in_unicode_escape = True
+                        self.unicode_escape_buffer = ""
+                        self.escape_next = False
+                        continue
+                    elif char == 'b':
+                        decoded_char = '\b'
+                    elif char == 'f':
+                        decoded_char = '\f'
                     else:
                         # Unknown escape - keep as-is
                         decoded_char = char
@@ -138,6 +189,15 @@ class StreamingJSONParser:
                     # Send decoded character to handler
                     path = '/' + '/'.join([name for name, bracket in self.path_stack]) if self.path_stack else ''
                     self.handler.on_value_chunk(path, self.current_field, decoded_char)
+                elif self.in_field_name:
+                    # Handle escapes in field names too
+                    self.buffer += char
+                    if char == 'u':
+                        # Start of unicode escape in field name
+                        self.in_unicode_escape = True
+                        self.unicode_escape_buffer = ""
+                        self.escape_next = False
+                        continue
                 self.escape_next = False
                 continue
             
@@ -146,6 +206,8 @@ class StreamingJSONParser:
                 if self.in_value:
                     self.buffer += char
                     # Don't send backslash to handler yet - wait for next char
+                elif self.in_field_name:
+                    self.buffer += char
                 continue
             
             # Entering a string (either field name or value)
@@ -166,7 +228,13 @@ class StreamingJSONParser:
             elif char == '"':
                 if self.in_field_name:
                     # Finished reading field name
-                    self.current_field = self.buffer
+                    # Parse the field name to handle any escape sequences
+                    try:
+                        parsed_field_name = json_module.loads('"' + self.buffer + '"')
+                        self.current_field = parsed_field_name
+                    except Exception:
+                        # If parsing fails, use the raw buffer
+                        self.current_field = self.buffer
                     self.in_field_name = False
                     self.buffer = ""
                 elif self.in_value:
@@ -174,8 +242,13 @@ class StreamingJSONParser:
                     field_name = self.current_field  # Save before clearing
                     # Build path string for the handler
                     path = '/' + '/'.join([name for name, bracket in self.path_stack]) if self.path_stack else ''
-                    # For string values, the parsed value is just the string itself
-                    self.handler.on_field_end(path, field_name, self.buffer, parsed_value=self.buffer)
+                    # Parse the string value to handle escape sequences
+                    try:
+                        parsed_value = json_module.loads('"' + self.buffer + '"')
+                    except Exception:
+                        # If parsing fails, use the raw buffer
+                        parsed_value = self.buffer
+                    self.handler.on_field_end(path, field_name, self.buffer, parsed_value=parsed_value)
                     self.in_value = False
                     self.current_field = None
                     self.buffer = ""
