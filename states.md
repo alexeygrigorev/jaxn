@@ -172,7 +172,7 @@ The 4 hex digits are accumulated and decoded to a Unicode character.
 
 Several helper functions manage state transitions for complex scenarios:
 
-### handle_close_brace(parser)
+### handle_close_brace(tracker, extractor, handler, parser)
 
 [Source](jaxn/states.py#L18)
 
@@ -181,9 +181,9 @@ Handles closing `}` brace:
 - Pops bracket stack and path stack
 - Transitions to InArrayWaitState, InObjectWaitState, or RootState based on new stack top
 
-### handle_close_bracket(parser)
+### handle_close_bracket(tracker, extractor, handler, parser)
 
-[Source](jaxn/states.py#L50)
+[Source](jaxn/states.py#L43)
 
 Handles closing `]` bracket:
 - Fires on_array_item_end for the last primitive item if applicable
@@ -191,18 +191,29 @@ Handles closing `]` bracket:
 - Pops bracket stack and path stack
 - Transitions to InArrayWaitState, InObjectWaitState, or RootState
 
-### check_primitive_array_item_end(parser, last_char)
+### check_primitive_array_item_end(tracker, extractor, handler, last_char)
 
-[Source](jaxn/states.py#L90)
+[Source](jaxn/states.py#L83)
 
 Checks if a primitive item in an array just ended.
 Fires on_array_item_end for the completed item.
 
-### check_primitive_array_item_end_on_seperator(parser)
+### check_primitive_array_item_end_on_seperator(tracker, extractor, handler)
 
-[Source](jaxn/states.py#L106)
+[Source](jaxn/states.py#L99)
 
 Similar to above, but checks by looking backward from comma or `]` to find the last non-whitespace character.
+
+## Tracker Helper Methods
+
+The tracker class provides several helper methods for checking state:
+
+- [at_array_level()](jaxn/tracker.py#L102) - Check if path_stack top is an array
+- [at_object_level()](jaxn/tracker.py#L111) - Check if path_stack top is an object
+- [has_brackets()](jaxn/tracker.py#L120) - Check if bracket stack is not empty
+- [is_object_in_array()](jaxn/tracker.py#L124) - Check if we're an object directly inside an array
+- [in_array()](jaxn/tracker.py#L94) - Check if bracket_stack top is '['
+- [in_object()](jaxn/tracker.py#L98) - Check if bracket_stack top is '{'
 
 ## State References
 
