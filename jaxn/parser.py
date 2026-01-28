@@ -54,14 +54,6 @@ class StreamingJSONParser:
         self._previous_state = self._state
         self._state = new_state
 
-    def _get_path(self, slice_index: int = None) -> str:
-        """Get path string from path_stack."""
-        return self.tracker.get_path(slice_index)
-
-    def _get_field_name(self) -> str:
-        """Get the current field name."""
-        return self.tracker.get_current_field_name()
-
     def parse_incremental(self, delta: str) -> None:
         """Parse new characters incrementally."""
         if not delta:
