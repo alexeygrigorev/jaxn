@@ -42,7 +42,7 @@ def test_path_tracking():
     assert len(handler.paths) > 0
     
     # Check root-level title
-    root_title = [p for p in handler.paths if p[0] == '' and p[1] == 'title']
+    root_title = [p for p in handler.paths if p[0] == '/' and p[1] == 'title']
     assert len(root_title) == 1
     assert root_title[0][2] == "Main Title"
     

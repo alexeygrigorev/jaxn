@@ -378,7 +378,7 @@ def test_same_field_name_at_different_levels():
     
     assert len(names_with_path) == 3
     # Root level
-    assert ('', 'Root') in names_with_path
+    assert ('/', 'Root') in names_with_path
     # Child level
     child_names = [v for p, v in names_with_path if 'child' in p and 'grandchild' not in p]
     assert 'Child' in child_names

@@ -106,11 +106,11 @@ class StreamingJSONParser:
                         If None, uses the full path_stack
         
         Returns:
-            Path string like '/sections/references' or empty string for root
+            Path string like '/sections/references' or '/' for root
         """
         stack = stack_slice if stack_slice is not None else self.path_stack
         if not stack:
-            return ''
+            return '/'
         # Extract just the field names (first element of each tuple)
         names = [entry[0] if isinstance(entry, tuple) else entry for entry in stack]
         return '/' + '/'.join(names)

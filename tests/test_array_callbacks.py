@@ -35,8 +35,8 @@ def test_array_item_callbacks():
     assert len(handler.ends) == 2
     
     # All should be for 'items' field at root path
-    assert all(path == '' and field == 'items' for path, field in handler.starts)
-    assert all(path == '' and field == 'items' for path, field in handler.ends)
+    assert all(path == '/' and field == 'items' for path, field in handler.starts)
+    assert all(path == '/' and field == 'items' for path, field in handler.ends)
 
 
 def test_nested_array_callbacks():
@@ -79,7 +79,7 @@ def test_nested_array_callbacks():
     # Check sections events
     section_starts = [e for e in starts if e[2] == 'sections']
     assert len(section_starts) == 1
-    assert section_starts[0][1] == ''  # root path
+    assert section_starts[0][1] == '/'  # root path
     
     # Check references events
     ref_starts = [e for e in starts if e[2] == 'references']
