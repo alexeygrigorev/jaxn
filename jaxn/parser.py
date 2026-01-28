@@ -37,8 +37,8 @@ class StreamingJSONParser:
         self._context = Context()
         self._field_name: str = ""
 
-        # Stack tracking - now managed by StackTracker
-        self._stacks = StackTracker()
+        # Stack tracking - managed by StackTracker
+        self.stack_tracker = StackTracker()
 
         # Position tracking
         self._array_starts: Dict[tuple, int] = {}
@@ -59,26 +59,6 @@ class StreamingJSONParser:
         """Name of current state for debugging."""
         return self._state.name if self._state else "None"
 
-    # Expose stack tracker methods for backward compatibility with states
-    @property
-    def _bracket_stack(self):
-        return self._stacks.bracket_stack
-
-    @property
-    def _path_stack(self):
-        return self._stacks.path_stack
-
-    def _in_array(self):
-        return self._stacks.in_array()
-
-    def _in_object(self):
-        return self._stacks.in_object()
-
-    @property
-    def _recent_context(self) -> str:
-        """Get the recent context string (for compatibility)."""
-        return str(self._context)
-
     # ========================================================================
     # CORE PARSING METHODS
     # ========================================================================
@@ -90,13 +70,13 @@ class StreamingJSONParser:
 
     def _get_path(self, slice_index: int = None) -> str:
         """Get path string from path_stack."""
-        return self._stacks.get_path(slice_index)
+        return self.stack_tracker.get_path(slice_index)
 
     def _get_field_name(self) -> str:
         """Get the current field name."""
         # If we're in an array, use the array's field name from path_stack
-        if self._stacks.in_array() and self._stacks.path_stack:
-            return self._stacks.path_stack[-1][0]
+        if self.stack_tracker.in_array() and self.stack_tracker.path_stack:
+            return self.stack_tracker.path_stack[-1][0]
         # Otherwise use the current field name
         return self._field_name
 

@@ -22,26 +22,26 @@ def handle_close_brace(parser) -> None:
 
     # Check if this is an object ending inside an array
     is_object_in_array = (
-        len(parser._bracket_stack) >= 2 and
-        parser._bracket_stack[-1] == '{' and
-        parser._bracket_stack[-2] == '['
+        len(parser.stack_tracker.bracket_stack) >= 2 and
+        parser.stack_tracker.bracket_stack[-1] == '{' and
+        parser.stack_tracker.bracket_stack[-2] == '['
     )
 
-    if is_object_in_array and len(parser._path_stack) >= 2:
+    if is_object_in_array and len(parser.stack_tracker.path_stack) >= 2:
         # Object is inside an array - get array field from path_stack
-        array_field = parser._path_stack[-2][0]
+        array_field = parser.stack_tracker.path_stack[-2][0]
         path = parser._get_path(-2)
         obj = parser._extractor.extract_last_object()
         if obj:
             parser.handler.on_array_item_end(path, array_field, item=obj)
 
-    parser._bracket_stack.pop()
+    parser.stack_tracker.bracket_stack.pop()
 
-    if parser._path_stack and parser._path_stack[-1][1] == '{':
-        parser._path_stack.pop()
+    if parser.stack_tracker.path_stack and parser.stack_tracker.path_stack[-1][1] == '{':
+        parser.stack_tracker.path_stack.pop()
 
-    if parser._bracket_stack:
-        if parser._in_array():
+    if parser.stack_tracker.bracket_stack:
+        if parser.stack_tracker.in_array():
             parser._transition(InArrayWaitState(parser))
         else:
             parser._transition(InObjectWaitState(parser))
@@ -54,22 +54,22 @@ def handle_close_bracket(parser) -> None:
     # Import states locally to avoid circular import at module level
     from .states import InArrayWaitState, InObjectWaitState, RootState
 
-    if (len(parser._bracket_stack) >= 2 and
-        parser._path_stack and parser._path_stack[-1][1] == '['):
+    if (len(parser.stack_tracker.bracket_stack) >= 2 and
+        parser.stack_tracker.path_stack and parser.stack_tracker.path_stack[-1][1] == '['):
 
         pos = len(parser._context) - 2
         if pos >= 0:
             while pos >= 0 and parser._context[pos] in ' \t\n\r':
                 pos -= 1
             if pos >= 0 and parser._context[pos] not in '}]':
-                array_field = parser._path_stack[-1][0]
+                array_field = parser.stack_tracker.path_stack[-1][0]
                 path = parser._get_path(-1)
                 item = parser._extractor.extract_last_array_item()
                 if item is not None:
                     parser.handler.on_array_item_end(path, array_field, item=item)
 
-    if parser._path_stack and parser._path_stack[-1][1] == '[':
-        field_name = parser._path_stack[-1][0]
+    if parser.stack_tracker.path_stack and parser.stack_tracker.path_stack[-1][1] == '[':
+        field_name = parser.stack_tracker.path_stack[-1][0]
         path = parser._get_path(-1)
         key = (path, field_name)
         start_pos = parser._array_starts.get(key, 0)
@@ -78,12 +78,12 @@ def handle_close_bracket(parser) -> None:
         parser.handler.on_field_end(path, field_name, arr_str, parsed_value=arr)
         if key in parser._array_starts:
             del parser._array_starts[key]
-        parser._path_stack.pop()
+        parser.stack_tracker.path_stack.pop()
 
-    parser._bracket_stack.pop()
+    parser.stack_tracker.bracket_stack.pop()
 
-    if parser._bracket_stack:
-        if parser._in_array():
+    if parser.stack_tracker.bracket_stack:
+        if parser.stack_tracker.in_array():
             parser._transition(InArrayWaitState(parser))
         else:
             parser._transition(InObjectWaitState(parser))
@@ -93,14 +93,14 @@ def handle_close_bracket(parser) -> None:
 
 def check_primitive_array_item_end(parser, last_char: str) -> None:
     """Check if we just finished a primitive item in an array."""
-    if not parser._in_array():
+    if not parser.stack_tracker.in_array():
         return
-    if not parser._path_stack or parser._path_stack[-1][1] != '[':
+    if not parser.stack_tracker.path_stack or parser.stack_tracker.path_stack[-1][1] != '[':
         return
     if last_char in '}]':
         return
 
-    array_field = parser._path_stack[-1][0]
+    array_field = parser.stack_tracker.path_stack[-1][0]
     path = parser._get_path(-1)
     item = parser._extractor.extract_last_array_item()
     if item is not None:
@@ -109,9 +109,9 @@ def check_primitive_array_item_end(parser, last_char: str) -> None:
 
 def check_primitive_array_item_end_on_seperator(parser) -> None:
     """Check if we just finished a primitive item when comma or ] is seen."""
-    if not parser._in_array():
+    if not parser.stack_tracker.in_array():
         return
-    if not parser._path_stack or parser._path_stack[-1][1] != '[':
+    if not parser.stack_tracker.path_stack or parser.stack_tracker.path_stack[-1][1] != '[':
         return
 
     # Look at the character before the comma/]
@@ -131,7 +131,7 @@ def check_primitive_array_item_end_on_seperator(parser) -> None:
     if last_char in '}]':
         return
 
-    array_field = parser._path_stack[-1][0]
+    array_field = parser.stack_tracker.path_stack[-1][0]
     path = parser._get_path(-1)
     item = parser._extractor.extract_last_array_item()
     if item is not None:
@@ -173,11 +173,11 @@ class RootState(ParserState):
             self._handle_open_bracket()
 
     def _handle_open_brace(self) -> None:
-        self.parser._bracket_stack.append('{')
+        self.parser.stack_tracker.bracket_stack.append('{')
         self.parser._transition(InObjectWaitState(self.parser))
 
     def _handle_open_bracket(self) -> None:
-        self.parser._bracket_stack.append('[')
+        self.parser.stack_tracker.bracket_stack.append('[')
         self.parser._transition(InArrayWaitState(self.parser))
 
 
@@ -245,8 +245,8 @@ class AfterColonState(ParserState):
 
     def _handle_object_start(self) -> None:
         self.parser.handler.on_field_start(self.parser._get_path(), self.parser._field_name)
-        self.parser._path_stack.append((self.parser._field_name, '{', len(self.parser._bracket_stack)))
-        self.parser._bracket_stack.append('{')
+        self.parser.stack_tracker.path_stack.append((self.parser._field_name, '{', len(self.parser.stack_tracker.bracket_stack)))
+        self.parser.stack_tracker.bracket_stack.append('{')
         self.parser._field_name = ""
         self.parser._transition(InObjectWaitState(self.parser))
 
@@ -255,10 +255,10 @@ class AfterColonState(ParserState):
         self.parser.handler.on_field_start(path, self.parser._field_name)
 
         key = (path, self.parser._field_name)
-        self.parser._array_starts[key] = len(self.parser._recent_context) - 1
+        self.parser._array_starts[key] = len(self.parser._context) - 1
 
-        self.parser._path_stack.append((self.parser._field_name, '[', len(self.parser._bracket_stack)))
-        self.parser._bracket_stack.append('[')
+        self.parser.stack_tracker.path_stack.append((self.parser._field_name, '[', len(self.parser.stack_tracker.bracket_stack)))
+        self.parser.stack_tracker.bracket_stack.append('[')
         self.parser._field_name = ""
         self.parser._transition(InArrayWaitState(self.parser))
 
@@ -294,7 +294,7 @@ class ValueStringState(ParserState):
 
         # Only call on_field_end if we're NOT in an array
         # Strings in arrays are items, not field values
-        if not self.parser._in_array():
+        if not self.parser.stack_tracker.in_array():
             path = self.parser._get_path()
             field = self.parser._field_name
             self.parser.handler.on_field_end(path, field, raw, parsed_value=parsed)
@@ -302,7 +302,7 @@ class ValueStringState(ParserState):
 
         self.parser._buffer = ""
 
-        if self.parser._in_array():
+        if self.parser.stack_tracker.in_array():
             self.parser._transition(InArrayWaitState(self.parser))
         else:
             self.parser._transition(InObjectWaitState(self.parser))
@@ -337,7 +337,7 @@ class PrimitiveState(ParserState):
 
         # Only call on_field_end if we're NOT in an array
         # Primitives in arrays are items, not field values
-        if not self.parser._in_array():
+        if not self.parser.stack_tracker.in_array():
             path = self.parser._get_path()
             field = self.parser._field_name
             self.parser.handler.on_field_end(path, field, raw, parsed_value=parsed)
@@ -346,7 +346,7 @@ class PrimitiveState(ParserState):
         self.parser._buffer = ""
 
         if char == ',':
-            if self.parser._in_array() and raw:
+            if self.parser.stack_tracker.in_array() and raw:
                 check_primitive_array_item_end(self.parser, raw[-1])
             self._transition_to_wait_state()
         elif char == '}':
@@ -355,7 +355,7 @@ class PrimitiveState(ParserState):
             handle_close_bracket(self.parser)
 
     def _transition_to_wait_state(self) -> None:
-        if self.parser._in_array():
+        if self.parser.stack_tracker.in_array():
             self.parser._transition(InArrayWaitState(self.parser))
         else:
             self.parser._transition(InObjectWaitState(self.parser))
@@ -416,23 +416,23 @@ class InArrayWaitState(ParserState):
         self.parser._transition(ValueStringState(self.parser))
 
     def _handle_object_start(self) -> None:
-        if self.parser._path_stack and self.parser._path_stack[-1][1] == '[':
-            array_field = self.parser._path_stack[-1][0]
+        if self.parser.stack_tracker.path_stack and self.parser.stack_tracker.path_stack[-1][1] == '[':
+            array_field = self.parser.stack_tracker.path_stack[-1][0]
             path = self.parser._get_path(-1)
             self.parser.handler.on_array_item_start(path, array_field)
 
-        self.parser._bracket_stack.append('{')
-        self.parser._path_stack.append(('', '{', len(self.parser._bracket_stack) - 1))
+        self.parser.stack_tracker.bracket_stack.append('{')
+        self.parser.stack_tracker.path_stack.append(('', '{', len(self.parser.stack_tracker.bracket_stack) - 1))
         self.parser._transition(InObjectWaitState(self.parser))
 
     def _handle_array_start(self) -> None:
-        self.parser._bracket_stack.append('[')
-        self.parser._path_stack.append(('', '[', len(self.parser._bracket_stack) - 1))
+        self.parser.stack_tracker.bracket_stack.append('[')
+        self.parser.stack_tracker.path_stack.append(('', '[', len(self.parser.stack_tracker.bracket_stack) - 1))
         self.parser._transition(InArrayWaitState(self.parser))
 
     def _handle_primitive_start(self, char: str) -> None:
-        if self.parser._path_stack and self.parser._path_stack[-1][1] == '[':
-            array_field = self.parser._path_stack[-1][0]
+        if self.parser.stack_tracker.path_stack and self.parser.stack_tracker.path_stack[-1][1] == '[':
+            array_field = self.parser.stack_tracker.path_stack[-1][0]
             path = self.parser._get_path(-1)
             self.parser.handler.on_field_start(path, array_field)
         self.parser._buffer = char
