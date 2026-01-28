@@ -141,12 +141,11 @@ def check_primitive_array_item_end_on_seperator(parser) -> None:
 class ParserState:
     """Base class for parser states."""
 
-    def __init__(self, parser: 'StreamingJSONParser' = None):
+    def __init__(self, parser: 'StreamingJSONParser'):
         self.parser = parser
-        if parser is not None:
-            self.tracker = parser.tracker
-            self.handler = parser.handler
-            self.buffers = parser.buffers
+        self.tracker = parser.tracker
+        self.handler = parser.handler
+        self.buffers = parser.buffers
 
     def handle(self, char: str) -> None:
         """Handle a character. Subclasses must implement."""
