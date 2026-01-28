@@ -286,7 +286,30 @@ class StreamingJSONParser:
             # Track colons (they come after field names, before values)
             elif char == ':' and not self.in_value and not self.in_field_name:
                 self.after_colon = True
-            
+
+            # Handle comma - may indicate array item end for primitives
+            elif char == ',' and not self.in_value and not self.in_field_name:
+                # Check if we're directly inside an array (not inside a nested object)
+                if self.bracket_stack and self.bracket_stack[-1] == '[':
+                    # Only fire if the previous item was NOT an object (objects are handled by } case)
+                    # Look at the character before the comma to determine item type
+                    pos = len(self.recent_context) - 2  # -2 because current char is ,
+                    if pos >= 0:
+                        # Skip whitespace before comma
+                        while pos >= 0 and self.recent_context[pos] in ' \t\n\r':
+                            pos -= 1
+
+                        # Only fire if last item is NOT an object (}) or nested array (])
+                        # Objects are handled by the } case above
+                        if pos >= 0 and self.recent_context[pos] not in '}]':
+                            if self.path_stack and self.path_stack[-1][1] == '[':
+                                array_field = self.path_stack[-1][0]
+                                path = self._get_path_from_stack(self.path_stack[:-1])
+                                # Extract and parse the complete primitive item
+                                item = self._extract_last_array_item()
+                                if item is not None:
+                                    self.handler.on_array_item_end(path, array_field, item=item)
+
             # Handle non-string values (objects, arrays, booleans, numbers, null)
             elif (char in '{[' or char.isdigit() or char in 'tfn') and self.after_colon:
                 # Non-string value - push field name onto stack for objects/arrays
@@ -322,7 +345,7 @@ class StreamingJSONParser:
             elif char in '}]' and not self.in_value and not self.in_field_name:
                 # Determine what we're closing
                 expected_opener = '{' if char == '}' else '['
-                
+
                 # If closing } inside an array, fire array item end
                 if char == '}' and self.bracket_stack and len(self.bracket_stack) >= 2:
                     # Check if we're closing an object that's inside an array
@@ -334,7 +357,31 @@ class StreamingJSONParser:
                             # Extract and parse the complete object
                             parsed_obj = self._extract_last_complete_object()
                             self.handler.on_array_item_end(path, array_field, item=parsed_obj)
-                
+
+                # If closing ] and the array might have primitive items
+                # Only fire if we're directly in an array and the last item wasn't an object
+                # (objects are already handled by the } case above)
+                if char == ']' and self.bracket_stack and len(self.bracket_stack) >= 2:
+                    # Only handle if the previous bracket (after this pop) is NOT another [
+                    # This means we're not in a nested array situation
+                    if self.path_stack and self.path_stack[-1][1] == '[':
+                        # Look at the character before ] to determine the item type
+                        pos = len(self.recent_context) - 2  # -2 because current char is ]
+                        if pos >= 0:
+                            # Skip whitespace
+                            while pos >= 0 and self.recent_context[pos] in ' \t\n\r':
+                                pos -= 1
+
+                            # Only fire if last item is NOT an object (}) or nested array (])
+                            # Objects are handled by the } case above, nested arrays by recursion
+                            if pos >= 0 and self.recent_context[pos] not in '}]':
+                                # Last item is a primitive (string, number, boolean, null)
+                                array_field = self.path_stack[-1][0]
+                                path = self._get_path_from_stack(self.path_stack[:-1])
+                                item = self._extract_last_array_item()
+                                if item is not None:
+                                    self.handler.on_array_item_end(path, array_field, item=item)
+
                 # Pop from bracket stack
                 if self.bracket_stack and self.bracket_stack[-1] == expected_opener:
                     # Get the depth after popping this bracket
@@ -387,7 +434,7 @@ class StreamingJSONParser:
         # Search backwards for the last complete {...} object
         bracket_count = 0
         start_pos = -1
-        
+
         for i in range(len(self.recent_context) - 1, -1, -1):
             ch = self.recent_context[i]
             if ch == '}':
@@ -397,7 +444,7 @@ class StreamingJSONParser:
                 if bracket_count == 0:
                     start_pos = i
                     break
-        
+
         if start_pos >= 0:
             json_str = self.recent_context[start_pos:]
             # Try to find where this object ends
@@ -412,13 +459,111 @@ class StreamingJSONParser:
                     if bracket_count == 0:
                         end_pos = i + 1
                         break
-            
+
             json_str = self.recent_context[start_pos:end_pos]
             try:
                 return json_module.loads(json_str)
             except Exception:
                 return None
         return None
+
+    def _extract_last_array_item(self):
+        """
+        Extract the last complete item from an array.
+        Handles strings, numbers, booleans, null, objects, and nested arrays.
+        Returns the parsed value or None if extraction fails.
+        """
+        if not self.recent_context:
+            return None
+
+        # Start from the end of recent_context and work backwards
+        pos = len(self.recent_context) - 1
+
+        # Skip trailing whitespace and the character that triggered this (comma or bracket)
+        while pos >= 0 and self.recent_context[pos] in ',] \t\n\r':
+            pos -= 1
+
+        if pos < 0:
+            return None
+
+        last_char = self.recent_context[pos]
+
+        # Case 1: Object {...}
+        if last_char == '}':
+            return self._extract_last_complete_object()
+
+        # Case 2: Array [...]
+        if last_char == ']':
+            bracket_count = 0
+            start_pos = -1
+
+            for i in range(pos, -1, -1):
+                ch = self.recent_context[i]
+                if ch == ']':
+                    bracket_count += 1
+                elif ch == '[':
+                    bracket_count -= 1
+                    if bracket_count == 0:
+                        start_pos = i
+                        break
+
+            if start_pos >= 0:
+                json_str = self.recent_context[start_pos:pos + 1]
+                try:
+                    return json_module.loads(json_str)
+                except Exception:
+                    return None
+
+        # Case 3: String "..."
+        if last_char == '"':
+            # Find the matching opening quote, accounting for escapes
+            in_string = True
+            escape_next = False
+            start_pos = pos
+
+            for i in range(pos - 1, -1, -1):
+                ch = self.recent_context[i]
+
+                if escape_next:
+                    escape_next = False
+                    continue
+
+                if ch == '\\':
+                    escape_next = True
+                    continue
+
+                if ch == '"':
+                    # Found the opening quote
+                    start_pos = i
+                    break
+
+            json_str = self.recent_context[start_pos:pos + 1]
+            try:
+                return json_module.loads(json_str)
+            except Exception:
+                return None
+
+        # Case 4: Primitive value (number, boolean, null)
+        # These end at the current position and start after whitespace or a delimiter
+        end_pos = pos + 1
+        start_pos = pos
+
+        # Find the start of the primitive value
+        # It starts after: whitespace, comma, opening bracket, or colon
+        while start_pos > 0:
+            ch = self.recent_context[start_pos - 1]
+            if ch in ',:[ \t\n\r':
+                break
+            start_pos -= 1
+
+        json_str = self.recent_context[start_pos:end_pos].strip()
+        if not json_str:
+            return None
+
+        try:
+            return json_module.loads(json_str)
+        except Exception:
+            return None
     
     def _extract_last_complete_array(self):
         """
