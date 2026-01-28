@@ -6,7 +6,7 @@ Note: The parser uses a state machine pattern internally. For full implementatio
 
 ## State Diagram
 
-```mermaid
+```
 stateDiagram-v2
     [*] --> Root
 
