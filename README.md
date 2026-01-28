@@ -247,6 +247,10 @@ class FieldExtractor(JSONParserHandler):
 
 WTFPL - Do What The Fuck You Want To Public License
 
+## Internals
+
+The parser is implemented using a state machine pattern with 10 distinct states that handle character-by-character parsing. For details on the state machine implementation, see [states.md](states.md).
+
 ## Links
 
 - **GitHub**: https://github.com/alexeygrigorev/jaxn
