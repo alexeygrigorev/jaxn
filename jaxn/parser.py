@@ -9,6 +9,8 @@ import json as json_module
 from typing import Any, Dict, List, Tuple, Optional
 
 from .handler import JSONParserHandler
+from .context import Context
+from .extractor import JSONExtractor
 from .states import (
     ParserState,
     RootState,
@@ -37,7 +39,7 @@ class StreamingJSONParser:
         self._unicode_buf: str = ""
 
         # Context tracking
-        self._recent_context: str = ""
+        self._context = Context()
         self._field_name: str = ""
 
         # Stack tracking
@@ -46,6 +48,9 @@ class StreamingJSONParser:
 
         # Position tracking
         self._array_starts: Dict[Tuple[str, str], int] = {}
+
+        # Extractor for pulling JSON values from context
+        self._extractor = JSONExtractor(self._context)
 
         # Initialize state after parser is fully constructed
         self._state = RootState(self)
@@ -59,6 +64,11 @@ class StreamingJSONParser:
     def state_name(self) -> str:
         """Name of current state for debugging."""
         return self._state.name if self._state else "None"
+
+    @property
+    def _recent_context(self) -> str:
+        """Get the recent context string (for compatibility)."""
+        return str(self._context)
 
     # ========================================================================
     # CORE PARSING METHODS
@@ -79,10 +89,10 @@ class StreamingJSONParser:
 
     def _add_to_context(self, char: str) -> None:
         """Add character to recent context, managing size."""
-        self._recent_context += char
-        if len(self._recent_context) > 50000:
-            trim_amount = len(self._recent_context) - 50000
-            self._recent_context = self._recent_context[-50000:]
+        self._context.append(char)
+
+        trim_amount = self._context._trim_if_needed()
+        if trim_amount > 0:
             self._array_starts = {
                 key: pos - trim_amount
                 for key, pos in self._array_starts.items()
@@ -128,7 +138,7 @@ class StreamingJSONParser:
             # Object is inside an array - get array field from path_stack
             array_field = self._path_stack[-2][0]
             path = self._get_path(-2)
-            obj = self._extract_last_object()
+            obj = self._extractor.extract_last_object()
             if obj:
                 self.handler.on_array_item_end(path, array_field, item=obj)
 
@@ -150,14 +160,14 @@ class StreamingJSONParser:
         if (len(self._bracket_stack) >= 2 and
             self._path_stack and self._path_stack[-1][1] == '['):
 
-            pos = len(self._recent_context) - 2
+            pos = len(self._context) - 2
             if pos >= 0:
-                while pos >= 0 and self._recent_context[pos] in ' \t\n\r':
+                while pos >= 0 and self._context[pos] in ' \t\n\r':
                     pos -= 1
-                if pos >= 0 and self._recent_context[pos] not in '}]':
+                if pos >= 0 and self._context[pos] not in '}]':
                     array_field = self._path_stack[-1][0]
                     path = self._get_path(-1)
-                    item = self._extract_last_array_item()
+                    item = self._extractor.extract_last_array_item()
                     if item is not None:
                         self.handler.on_array_item_end(path, array_field, item=item)
 
@@ -165,8 +175,9 @@ class StreamingJSONParser:
             field_name = self._path_stack[-1][0]
             path = self._get_path(-1)
             key = (path, field_name)
-            arr = self._extract_array_at_position(key)
-            arr_str = self._extract_array_string_at_position(key)
+            start_pos = self._array_starts.get(key, 0)
+            arr = self._extractor.extract_array_at_position(start_pos)
+            arr_str = self._extractor.extract_array_string_at_position(start_pos)
             self.handler.on_field_end(path, field_name, arr_str, parsed_value=arr)
             if key in self._array_starts:
                 del self._array_starts[key]
@@ -193,7 +204,7 @@ class StreamingJSONParser:
 
         array_field = self._path_stack[-1][0]
         path = self._get_path(-1)
-        item = self._extract_last_array_item()
+        item = self._extractor.extract_last_array_item()
         if item is not None:
             self.handler.on_array_item_end(path, array_field, item=item)
 
@@ -205,17 +216,17 @@ class StreamingJSONParser:
             return
 
         # Look at the character before the comma/]
-        pos = len(self._recent_context) - 2
+        pos = len(self._context) - 2
         if pos < 0:
             return
 
         # Skip whitespace
-        while pos >= 0 and self._recent_context[pos] in ' \t\n\r':
+        while pos >= 0 and self._context[pos] in ' \t\n\r':
             pos -= 1
         if pos < 0:
             return
 
-        last_char = self._recent_context[pos]
+        last_char = self._context[pos]
 
         # Don't fire for objects (}) or nested arrays (])
         if last_char in '}]':
@@ -223,179 +234,6 @@ class StreamingJSONParser:
 
         array_field = self._path_stack[-1][0]
         path = self._get_path(-1)
-        item = self._extract_last_array_item()
+        item = self._extractor.extract_last_array_item()
         if item is not None:
             self.handler.on_array_item_end(path, array_field, item=item)
-
-    # ========================================================================
-    # EXTRACTION METHODS
-    # ========================================================================
-
-    def _extract_last_object(self) -> Optional[Dict]:
-        bracket_count = 0
-        start_pos = -1
-
-        for i in range(len(self._recent_context) - 1, -1, -1):
-            ch = self._recent_context[i]
-            if ch == '}':
-                bracket_count += 1
-            elif ch == '{':
-                bracket_count -= 1
-                if bracket_count == 0:
-                    start_pos = i
-                    break
-
-        if start_pos < 0:
-            return None
-
-        bracket_count = 0
-        end_pos = start_pos
-        for i in range(start_pos, len(self._recent_context)):
-            ch = self._recent_context[i]
-            if ch == '{':
-                bracket_count += 1
-            elif ch == '}':
-                bracket_count -= 1
-                if bracket_count == 0:
-                    end_pos = i + 1
-                    break
-
-        try:
-            return json_module.loads(self._recent_context[start_pos:end_pos])
-        except:
-            return None
-
-    def _extract_last_array_item(self) -> Any:
-        if not self._recent_context:
-            return None
-
-        pos = len(self._recent_context) - 1
-        while pos >= 0 and self._recent_context[pos] in ',] \t\n\r':
-            pos -= 1
-        if pos < 0:
-            return None
-
-        last_char = self._recent_context[pos]
-
-        if last_char == '}':
-            return self._extract_last_object()
-
-        if last_char == ']':
-            bracket_count = 0
-            start_pos = -1
-            for i in range(pos, -1, -1):
-                ch = self._recent_context[i]
-                if ch == ']':
-                    bracket_count += 1
-                elif ch == '[':
-                    bracket_count -= 1
-                    if bracket_count == 0:
-                        start_pos = i
-                        break
-            if start_pos >= 0:
-                try:
-                    return json_module.loads(self._recent_context[start_pos:pos + 1])
-                except:
-                    return None
-
-        if last_char == '"':
-            escape_next = False
-            start_pos = pos
-            for i in range(pos - 1, -1, -1):
-                ch = self._recent_context[i]
-                if escape_next:
-                    escape_next = False
-                    continue
-                if ch == '\\':
-                    escape_next = True
-                    continue
-                if ch == '"':
-                    start_pos = i
-                    break
-            try:
-                return json_module.loads(self._recent_context[start_pos:pos + 1])
-            except:
-                return None
-
-        end_pos = pos + 1
-        start_pos = pos
-        while start_pos > 0:
-            ch = self._recent_context[start_pos - 1]
-            if ch in ',:[ \t\n\r':
-                break
-            start_pos -= 1
-
-        json_str = self._recent_context[start_pos:end_pos].strip()
-        if not json_str:
-            return None
-        try:
-            return json_module.loads(json_str)
-        except:
-            return None
-
-    def _extract_array_at_position(self, key: Tuple[str, str]) -> Optional[List]:
-        if key not in self._array_starts:
-            return None
-
-        start_pos = self._array_starts[key]
-        bracket_count = 0
-        end_pos = len(self._recent_context)
-        in_string = False
-        escape_next = False
-
-        for i in range(start_pos, len(self._recent_context)):
-            ch = self._recent_context[i]
-            if escape_next:
-                escape_next = False
-                continue
-            if ch == '\\':
-                escape_next = True
-                continue
-            if ch == '"':
-                in_string = not in_string
-                continue
-            if not in_string:
-                if ch == '[':
-                    bracket_count += 1
-                elif ch == ']':
-                    bracket_count -= 1
-                    if bracket_count == 0:
-                        end_pos = i + 1
-                        break
-
-        try:
-            return json_module.loads(self._recent_context[start_pos:end_pos])
-        except:
-            return None
-
-    def _extract_array_string_at_position(self, key: Tuple[str, str]) -> str:
-        if key not in self._array_starts:
-            return ""
-
-        start_pos = self._array_starts[key]
-        bracket_count = 0
-        end_pos = len(self._recent_context)
-        in_string = False
-        escape_next = False
-
-        for i in range(start_pos, len(self._recent_context)):
-            ch = self._recent_context[i]
-            if escape_next:
-                escape_next = False
-                continue
-            if ch == '\\':
-                escape_next = True
-                continue
-            if ch == '"':
-                in_string = not in_string
-                continue
-            if not in_string:
-                if ch == '[':
-                    bracket_count += 1
-                elif ch == ']':
-                    bracket_count -= 1
-                    if bracket_count == 0:
-                        end_pos = i + 1
-                        break
-
-        return self._recent_context[start_pos + 1:end_pos - 1] if end_pos > start_pos + 1 else ""
