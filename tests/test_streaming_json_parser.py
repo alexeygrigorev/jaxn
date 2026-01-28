@@ -258,7 +258,7 @@ def test_context_detection():
     
     assert len(root_titles) == 1
     assert root_titles[0][1] == "Root Title"
-    assert root_titles[0][3] == ""  # Root path is empty
+    assert root_titles[0][3] == "/"  # Root path
     assert len(nested_titles) == 1
     assert nested_titles[0][1] == "Nested Title"
     assert nested_titles[0][3] == "/sections"  # Nested in sections
@@ -403,7 +403,7 @@ def test_search_result_article_formatting():
         
         def on_field_end(self, path, field_name, value, parsed_value=None):
             # Root-level title
-            if field_name == 'title' and path == '' and not self.displayed_title:
+            if field_name == 'title' and path == '/' and not self.displayed_title:
                 self.output_parts.append(f"# {value}\n")
                 self.displayed_title = True
             

@@ -217,8 +217,8 @@ def test_path_changes_during_parsing():
     parser = StreamingJSONParser(handler)
     parser.parse_incremental(json_str)
     
-    # Should have empty path, /level1, /level1/level2
-    assert '' in paths
+    # Should have root path, /level1, /level1/level2
+    assert '/' in paths
     assert '/level1' in paths
     assert '/level1/level2' in paths
 
@@ -249,7 +249,7 @@ def test_path_in_array_items():
     
     # Array items should be at root path
     item_starts = [p for p in paths if p[0] == 'item_start']
-    assert all(p[1] == '' for p in item_starts)
+    assert all(p[1] == '/' for p in item_starts)
     
     # Fields inside items should be at /items path
     field_ends = [p for p in paths if p[0] == 'field_end']

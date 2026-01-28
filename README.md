@@ -76,7 +76,7 @@ class SearchResultHandler(JSONParserHandler):
 
     def on_field_end(self, path, field_name, value, parsed_value=None):
         # Print title as main heading
-        if field_name == "title" and path == "":
+        if field_name == "title" and path == "/":
             print(f"# {value}")
         # Print section headings
         elif field_name == "heading":

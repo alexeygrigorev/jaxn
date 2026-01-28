@@ -243,8 +243,8 @@ def test_real_world_rag_response():
     # Verify all fields have both start and end
     fields = ['answer', 'confidence_explanation', 'answer_type', 'followup_questions']
     for field in fields:
-        assert ('start', '', field) in events, f"Missing start event for {field}"
-        assert ('end', '', field) in events, f"Missing end event for {field}"
+        assert ('start', '/', field) in events, f"Missing start event for {field}"
+        assert ('end', '/', field) in events, f"Missing end event for {field}"
 
 
 def test_array_of_numbers_at_end():
@@ -465,7 +465,7 @@ def test_array_at_end_preserves_path_correctly():
     # Find the 'sections' field_end event
     sections_events = [e for e in events if e[1] == 'sections']
     assert len(sections_events) == 1
-    assert sections_events[0][0] == ''
+    assert sections_events[0][0] == '/'
 
 
 if __name__ == "__main__":
