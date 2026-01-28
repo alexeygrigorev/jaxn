@@ -12,6 +12,131 @@ if TYPE_CHECKING:
 
 
 # ========================================================================
+# SHARED HELPER FUNCTIONS
+# ========================================================================
+
+def handle_close_brace(parser) -> None:
+    """Handle closing } brace - used by multiple states."""
+    from .states import InArrayWaitState, InObjectWaitState, RootState
+
+    # Check if this is an object ending inside an array
+    is_object_in_array = (
+        len(parser._bracket_stack) >= 2 and
+        parser._bracket_stack[-1] == '{' and
+        parser._bracket_stack[-2] == '['
+    )
+
+    if is_object_in_array and len(parser._path_stack) >= 2:
+        # Object is inside an array - get array field from path_stack
+        array_field = parser._path_stack[-2][0]
+        path = parser._get_path(-2)
+        obj = parser._extractor.extract_last_object()
+        if obj:
+            parser.handler.on_array_item_end(path, array_field, item=obj)
+
+    parser._bracket_stack.pop()
+
+    if parser._path_stack and parser._path_stack[-1][1] == '{':
+        parser._path_stack.pop()
+
+    if parser._bracket_stack:
+        if parser._in_array():
+            parser._transition(InArrayWaitState(parser))
+        else:
+            parser._transition(InObjectWaitState(parser))
+    else:
+        parser._transition(RootState(parser))
+
+
+def handle_close_bracket(parser) -> None:
+    """Handle closing ] bracket - used by multiple states."""
+    from .states import InArrayWaitState, InObjectWaitState, RootState
+
+    if (len(parser._bracket_stack) >= 2 and
+        parser._path_stack and parser._path_stack[-1][1] == '['):
+
+        pos = len(parser._context) - 2
+        if pos >= 0:
+            while pos >= 0 and parser._context[pos] in ' \t\n\r':
+                pos -= 1
+            if pos >= 0 and parser._context[pos] not in '}]':
+                array_field = parser._path_stack[-1][0]
+                path = parser._get_path(-1)
+                item = parser._extractor.extract_last_array_item()
+                if item is not None:
+                    parser.handler.on_array_item_end(path, array_field, item=item)
+
+    if parser._path_stack and parser._path_stack[-1][1] == '[':
+        field_name = parser._path_stack[-1][0]
+        path = parser._get_path(-1)
+        key = (path, field_name)
+        start_pos = parser._array_starts.get(key, 0)
+        arr = parser._extractor.extract_array_at_position(start_pos)
+        arr_str = parser._extractor.extract_array_string_at_position(start_pos)
+        parser.handler.on_field_end(path, field_name, arr_str, parsed_value=arr)
+        if key in parser._array_starts:
+            del parser._array_starts[key]
+        parser._path_stack.pop()
+
+    parser._bracket_stack.pop()
+
+    if parser._bracket_stack:
+        if parser._in_array():
+            parser._transition(InArrayWaitState(parser))
+        else:
+            parser._transition(InObjectWaitState(parser))
+    else:
+        parser._transition(RootState(parser))
+
+
+def check_primitive_array_item_end(parser, last_char: str) -> None:
+    """Check if we just finished a primitive item in an array."""
+    if not parser._in_array():
+        return
+    if not parser._path_stack or parser._path_stack[-1][1] != '[':
+        return
+    if last_char in '}]':
+        return
+
+    array_field = parser._path_stack[-1][0]
+    path = parser._get_path(-1)
+    item = parser._extractor.extract_last_array_item()
+    if item is not None:
+        parser.handler.on_array_item_end(path, array_field, item=item)
+
+
+def check_primitive_array_item_end_on_seperator(parser) -> None:
+    """Check if we just finished a primitive item when comma or ] is seen."""
+    if not parser._in_array():
+        return
+    if not parser._path_stack or parser._path_stack[-1][1] != '[':
+        return
+
+    # Look at the character before the comma/]
+    pos = len(parser._context) - 2
+    if pos < 0:
+        return
+
+    # Skip whitespace
+    while pos >= 0 and parser._context[pos] in ' \t\n\r':
+        pos -= 1
+    if pos < 0:
+        return
+
+    last_char = parser._context[pos]
+
+    # Don't fire for objects (}) or nested arrays (])
+    if last_char in '}]':
+        return
+
+    array_field = parser._path_stack[-1][0]
+    path = parser._get_path(-1)
+    item = parser._extractor.extract_last_array_item()
+    if item is not None:
+        parser.handler.on_array_item_end(path, array_field, item=item)
+
+
+# ========================================================================
 # BASE STATE CLASS
 # ========================================================================
 
@@ -220,12 +345,12 @@ class PrimitiveState(ParserState):
 
         if char == ',':
             if self.parser._in_array() and raw:
-                self.parser._check_primitive_array_item_end(raw[-1])
+                check_primitive_array_item_end(self.parser, raw[-1])
             self._transition_to_wait_state()
         elif char == '}':
-            self.parser._handle_close_brace()
+            handle_close_brace(self.parser)
         elif char == ']':
-            self.parser._handle_close_bracket()
+            handle_close_bracket(self.parser)
 
     def _transition_to_wait_state(self) -> None:
         if self.parser._in_array():
@@ -254,7 +379,7 @@ class InObjectWaitState(ParserState):
         self.parser._transition(FieldNameState(self.parser))
 
     def _handle_close_brace(self) -> None:
-        self.parser._handle_close_brace()
+        handle_close_brace(self.parser)
 
 
 class InArrayWaitState(ParserState):
@@ -279,10 +404,10 @@ class InArrayWaitState(ParserState):
             self._handle_primitive_start(char)
 
     def _handle_comma(self) -> None:
-        self.parser._check_primitive_array_item_end_on_seperator()
+        check_primitive_array_item_end_on_seperator(self.parser)
 
     def _handle_close_bracket(self) -> None:
-        self.parser._handle_close_bracket()
+        handle_close_bracket(self.parser)
 
     def _handle_string_start(self) -> None:
         self.parser._buffer = ""

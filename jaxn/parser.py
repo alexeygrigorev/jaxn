@@ -122,118 +122,25 @@ class StreamingJSONParser:
         self.parse_incremental(delta)
 
     # ========================================================================
-    # CLOSE BRACE/BRACKET HANDLERS
+    # LEGACY METHODS (kept for backward compatibility, now delegated to states)
     # ========================================================================
 
     def _handle_close_brace(self) -> None:
-        """Handle closing } brace."""
-        # Check if this is an object ending inside an array
-        is_object_in_array = (
-            len(self._bracket_stack) >= 2 and
-            self._bracket_stack[-1] == '{' and
-            self._bracket_stack[-2] == '['
-        )
-
-        if is_object_in_array and len(self._path_stack) >= 2:
-            # Object is inside an array - get array field from path_stack
-            array_field = self._path_stack[-2][0]
-            path = self._get_path(-2)
-            obj = self._extractor.extract_last_object()
-            if obj:
-                self.handler.on_array_item_end(path, array_field, item=obj)
-
-        self._bracket_stack.pop()
-
-        if self._path_stack and self._path_stack[-1][1] == '{':
-            self._path_stack.pop()
-
-        if self._bracket_stack:
-            if self._in_array():
-                self._transition(InArrayWaitState(self))
-            else:
-                self._transition(InObjectWaitState(self))
-        else:
-            self._transition(RootState(self))
+        """Handle closing } brace - delegated to states module."""
+        from .states import handle_close_brace
+        handle_close_brace(self)
 
     def _handle_close_bracket(self) -> None:
-        """Handle closing ] bracket."""
-        if (len(self._bracket_stack) >= 2 and
-            self._path_stack and self._path_stack[-1][1] == '['):
-
-            pos = len(self._context) - 2
-            if pos >= 0:
-                while pos >= 0 and self._context[pos] in ' \t\n\r':
-                    pos -= 1
-                if pos >= 0 and self._context[pos] not in '}]':
-                    array_field = self._path_stack[-1][0]
-                    path = self._get_path(-1)
-                    item = self._extractor.extract_last_array_item()
-                    if item is not None:
-                        self.handler.on_array_item_end(path, array_field, item=item)
-
-        if self._path_stack and self._path_stack[-1][1] == '[':
-            field_name = self._path_stack[-1][0]
-            path = self._get_path(-1)
-            key = (path, field_name)
-            start_pos = self._array_starts.get(key, 0)
-            arr = self._extractor.extract_array_at_position(start_pos)
-            arr_str = self._extractor.extract_array_string_at_position(start_pos)
-            self.handler.on_field_end(path, field_name, arr_str, parsed_value=arr)
-            if key in self._array_starts:
-                del self._array_starts[key]
-            self._path_stack.pop()
-
-        self._bracket_stack.pop()
-
-        if self._bracket_stack:
-            if self._in_array():
-                self._transition(InArrayWaitState(self))
-            else:
-                self._transition(InObjectWaitState(self))
-        else:
-            self._transition(RootState(self))
+        """Handle closing ] bracket - delegated to states module."""
+        from .states import handle_close_bracket
+        handle_close_bracket(self)
 
     def _check_primitive_array_item_end(self, last_char: str) -> None:
-        """Check if we just finished a primitive item in an array."""
-        if not self._in_array():
-            return
-        if not self._path_stack or self._path_stack[-1][1] != '[':
-            return
-        if last_char in '}]':
-            return
-
-        array_field = self._path_stack[-1][0]
-        path = self._get_path(-1)
-        item = self._extractor.extract_last_array_item()
-        if item is not None:
-            self.handler.on_array_item_end(path, array_field, item=item)
+        """Check if we just finished a primitive item in an array - delegated to states."""
+        from .states import check_primitive_array_item_end
+        check_primitive_array_item_end(self, last_char)
 
     def _check_primitive_array_item_end_on_seperator(self) -> None:
-        """Check if we just finished a primitive item when comma or ] is seen."""
-        if not self._in_array():
-            return
-        if not self._path_stack or self._path_stack[-1][1] != '[':
-            return
-
-        # Look at the character before the comma/]
-        pos = len(self._context) - 2
-        if pos < 0:
-            return
-
-        # Skip whitespace
-        while pos >= 0 and self._context[pos] in ' \t\n\r':
-            pos -= 1
-        if pos < 0:
-            return
-
-        last_char = self._context[pos]
-
-        # Don't fire for objects (}) or nested arrays (])
-        if last_char in '}]':
-            return
-
-        array_field = self._path_stack[-1][0]
-        path = self._get_path(-1)
-        item = self._extractor.extract_last_array_item()
-        if item is not None:
-            self.handler.on_array_item_end(path, array_field, item=item)
+        """Check primitive array item end on separator - delegated to states."""
+        from .states import check_primitive_array_item_end_on_seperator
+        check_primitive_array_item_end_on_seperator(self)
