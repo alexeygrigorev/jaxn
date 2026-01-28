@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 def handle_close_brace(parser) -> None:
     """Handle closing } brace - used by multiple states."""
+    # Import states locally to avoid circular import at module level
     from .states import InArrayWaitState, InObjectWaitState, RootState
 
     # Check if this is an object ending inside an array
@@ -50,6 +51,7 @@ def handle_close_brace(parser) -> None:
 
 def handle_close_bracket(parser) -> None:
     """Handle closing ] bracket - used by multiple states."""
+    # Import states locally to avoid circular import at module level
     from .states import InArrayWaitState, InObjectWaitState, RootState
 
     if (len(parser._bracket_stack) >= 2 and
@@ -308,7 +310,7 @@ class ValueStringState(ParserState):
     def _handle_regular_char(self, char: str) -> None:
         self.parser._buffer += char
         path = self.parser._get_path()
-        field = self.parser._path_stack[-1][0] if self.parser._in_array() and self.parser._path_stack else self.parser._field_name
+        field = self.parser._get_field_name()
         self.parser.handler.on_value_chunk(path, field, char)
 
 
@@ -460,7 +462,7 @@ class EscapeState(ParserState):
         if was_in_value:
             decoded = self._ESCAPE_MAP.get(char, char)
             path = self.parser._get_path()
-            field = self.parser._path_stack[-1][0] if self.parser._in_array() and self.parser._path_stack else self.parser._field_name
+            field = self.parser._get_field_name()
             self.parser.handler.on_value_chunk(path, field, decoded)
 
         self._transition_back(was_in_value)
@@ -497,7 +499,7 @@ class UnicodeEscapeState(ParserState):
             decoded = None
 
         path = self.parser._get_path()
-        field = self.parser._path_stack[-1][0] if self.parser._in_array() and self.parser._path_stack else self.parser._field_name
+        field = self.parser._get_field_name()
 
         if decoded is not None:
             self._handle_valid_escape(path, field, decoded)

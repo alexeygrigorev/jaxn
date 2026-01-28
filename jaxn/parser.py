@@ -5,18 +5,12 @@ Parse JSON incrementally using an explicit state machine where each state
 is an object with a handle() method that processes characters.
 """
 
-import json as json_module
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 
 from .handler import JSONParserHandler
 from .context import Context
 from .extractor import JSONExtractor
-from .states import (
-    ParserState,
-    RootState,
-    InObjectWaitState,
-    InArrayWaitState,
-)
+from .states import ParserState, RootState
 
 
 class StreamingJSONParser:
@@ -87,6 +81,14 @@ class StreamingJSONParser:
         names = [entry[0] for entry in stack if entry[0]]
         return '/' + '/'.join(names)
 
+    def _get_field_name(self) -> str:
+        """Get the current field name."""
+        # If we're in an array, use the array's field name from path_stack
+        if self._in_array() and self._path_stack:
+            return self._path_stack[-1][0]
+        # Otherwise use the current field name
+        return self._field_name
+
     def _add_to_context(self, char: str) -> None:
         """Add character to recent context, managing size."""
         self._context.append(char)
@@ -120,27 +122,3 @@ class StreamingJSONParser:
             raise ValueError("new_text must start with old_text")
         delta = new_text[len(old_text):]
         self.parse_incremental(delta)
-
-    # ========================================================================
-    # LEGACY METHODS (kept for backward compatibility, now delegated to states)
-    # ========================================================================
-
-    def _handle_close_brace(self) -> None:
-        """Handle closing } brace - delegated to states module."""
-        from .states import handle_close_brace
-        handle_close_brace(self)
-
-    def _handle_close_bracket(self) -> None:
-        """Handle closing ] bracket - delegated to states module."""
-        from .states import handle_close_bracket
-        handle_close_bracket(self)
-
-    def _check_primitive_array_item_end(self, last_char: str) -> None:
-        """Check if we just finished a primitive item in an array - delegated to states."""
-        from .states import check_primitive_array_item_end
-        check_primitive_array_item_end(self, last_char)
-
-    def _check_primitive_array_item_end_on_seperator(self) -> None:
-        """Check primitive array item end on separator - delegated to states."""
-        from .states import check_primitive_array_item_end_on_seperator
-        check_primitive_array_item_end_on_seperator(self)
