@@ -6,9 +6,10 @@ from the parsed context buffer.
 """
 
 import json as json_module
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from .context import Context
+if TYPE_CHECKING:
+    from .context import Context
 
 
 class JSONExtractor:
@@ -19,7 +20,7 @@ class JSONExtractor:
     (objects, arrays, strings, primitives) from the recent context.
     """
 
-    def __init__(self, context: Context):
+    def __init__(self, context: 'Context'):
         self.context = context
 
     def extract_last_object(self) -> Optional[Dict]:
