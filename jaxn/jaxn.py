@@ -90,12 +90,31 @@ class StreamingJSONParser:
         self.after_colon = False
         self.recent_context = ""  # Keep recent JSON for context detection - also used for parsing complete values
         self.buffer = ""  # Accumulation buffer for current string
-        self.path_stack = []  # Stack of (field_name, bracket_type): e.g., [('sections', '['), ('references', '[')]
+        self.path_stack = []  # Stack of (field_name, bracket_type, depth_when_added): e.g., [('sections', '[', 2), ('references', '[', 3)]
         self.bracket_stack = []  # Stack of just bracket types: e.g., ['{', '[', '{']
         self.pending_escape = ""  # Store backslash when we see it, to decode with next char
         self.object_start_pos = {}  # Track start position in recent_context for each object: {(path, field): position}
+        self.array_start_pos = {}  # Track start position in recent_context for each array: {(path, field): position}
         self.unicode_escape_buffer = ""  # Buffer for accumulating \uXXXX escape sequences
         self.in_unicode_escape = False  # Track if we're currently reading a \uXXXX sequence
+        
+    def _get_path_from_stack(self, stack_slice=None):
+        """
+        Helper to build path string from path_stack, handling both 2 and 3-element tuples.
+        
+        Args:
+            stack_slice: Specific slice of path_stack to use (e.g., path_stack[:-1])
+                        If None, uses the full path_stack
+        
+        Returns:
+            Path string like '/sections/references' or empty string for root
+        """
+        stack = stack_slice if stack_slice is not None else self.path_stack
+        if not stack:
+            return ''
+        # Extract just the field names (first element of each tuple)
+        names = [entry[0] if isinstance(entry, tuple) else entry for entry in stack]
+        return '/' + '/'.join(names)
         
     def parse_incremental(self, delta):
         """
@@ -128,11 +147,11 @@ class StreamingJSONParser:
                             decoded_char = chr(code_point)
                             
                             # Send decoded character to handler
-                            path = '/' + '/'.join([name for name, bracket in self.path_stack]) if self.path_stack else ''
+                            path = self._get_path_from_stack()
                             self.handler.on_value_chunk(path, self.current_field, decoded_char)
                         except (ValueError, OverflowError):
                             # Invalid unicode escape - send the literal characters including backslash
-                            path = '/' + '/'.join([name for name, bracket in self.path_stack]) if self.path_stack else ''
+                            path = self._get_path_from_stack()
                             for ch in ('\\u' + self.unicode_escape_buffer):
                                 self.handler.on_value_chunk(path, self.current_field, ch)
                         
@@ -188,7 +207,7 @@ class StreamingJSONParser:
                         decoded_char = char
                     
                     # Send decoded character to handler
-                    path = '/' + '/'.join([name for name, bracket in self.path_stack]) if self.path_stack else ''
+                    path = self._get_path_from_stack()
                     self.handler.on_value_chunk(path, self.current_field, decoded_char)
                 elif self.in_field_name:
                     # Handle escapes in field names too
@@ -217,7 +236,7 @@ class StreamingJSONParser:
                     # This is a value string - fire field start event
                     self.in_value = True
                     self.after_colon = False
-                    path = '/' + '/'.join([name for name, bracket in self.path_stack]) if self.path_stack else ''
+                    path = self._get_path_from_stack()
                     self.handler.on_field_start(path, self.current_field)
                     self.buffer = ""
                 else:
@@ -242,7 +261,7 @@ class StreamingJSONParser:
                     # Finished reading value - fire field end event
                     field_name = self.current_field  # Save before clearing
                     # Build path string for the handler
-                    path = '/' + '/'.join([name for name, bracket in self.path_stack]) if self.path_stack else ''
+                    path = self._get_path_from_stack()
                     # Parse the string value to handle escape sequences
                     try:
                         parsed_value = json_module.loads('"' + self.buffer + '"')
@@ -263,10 +282,16 @@ class StreamingJSONParser:
                 # Non-string value - push field name onto stack for objects/arrays
                 if char in '{[' and self.current_field:
                     # Fire field_start for array/object fields
-                    path = '/' + '/'.join([name for name, bracket in self.path_stack]) if self.path_stack else ''
+                    path = self._get_path_from_stack()
                     self.handler.on_field_start(path, self.current_field)
                     
-                    self.path_stack.append((self.current_field, char))
+                    # Track array start position for later extraction
+                    if char == '[':
+                        key = (path, self.current_field)
+                        # Position of '[' is current length minus 1 (since we already added char to recent_context)
+                        self.array_start_pos[key] = len(self.recent_context) - 1
+                    
+                    self.path_stack.append((self.current_field, char, len(self.bracket_stack)))
                     self.bracket_stack.append(char)
                 self.after_colon = False
                 self.current_field = None
@@ -280,7 +305,7 @@ class StreamingJSONParser:
                     # We're starting an object inside an array
                     if self.path_stack and self.path_stack[-1][1] == '[':
                         array_field = self.path_stack[-1][0]
-                        path = '/' + '/'.join([name for name, bracket in self.path_stack[:-1]]) if len(self.path_stack) > 1 else ''
+                        path = self._get_path_from_stack(self.path_stack[:-1])
                         self.handler.on_array_item_start(path, array_field)
             
             # Track closing of objects/arrays
@@ -295,25 +320,54 @@ class StreamingJSONParser:
                         # We're ending an object inside an array
                         if self.path_stack and self.path_stack[-1][1] == '[':
                             array_field = self.path_stack[-1][0]
-                            path = '/' + '/'.join([name for name, bracket in self.path_stack[:-1]]) if len(self.path_stack) > 1 else ''
+                            path = self._get_path_from_stack(self.path_stack[:-1])
                             # Extract and parse the complete object
                             parsed_obj = self._extract_last_complete_object()
                             self.handler.on_array_item_end(path, array_field, item=parsed_obj)
                 
                 # Pop from bracket stack
                 if self.bracket_stack and self.bracket_stack[-1] == expected_opener:
+                    # Get the depth after popping this bracket
+                    depth_after_pop = len(self.bracket_stack) - 1
                     self.bracket_stack.pop()
                     
-                    # Also pop from path stack if this matches
-                    if self.path_stack and self.path_stack[-1][1] == expected_opener:
-                        self.path_stack.pop()
+                    # Also pop from path stack if depth matches and fire field_end for arrays
+                    if self.path_stack:
+                        # Check if the top of path_stack was added at the current depth
+                        if len(self.path_stack[-1]) == 3:
+                            field_name, bracket_type, depth_when_added = self.path_stack[-1]
+                        else:
+                            # Backward compatibility: assume 2-element tuples
+                            field_name, bracket_type = self.path_stack[-1]
+                            depth_when_added = depth_after_pop
+                        
+                        # Only pop if the bracket type matches AND depth matches
+                        if bracket_type == expected_opener and depth_when_added == depth_after_pop:
+                            # If we're closing an array, fire on_field_end
+                            if char == ']' and bracket_type == '[':
+                                # Build path for the handler (parent path, not including the array being closed)
+                                if len(self.path_stack) > 1:
+                                    path = '/' + '/'.join([entry[0] if isinstance(entry, tuple) else entry for entry in self.path_stack[:-1]])
+                                else:
+                                    path = ''
+                                # Extract the complete array value using tracked position
+                                key = (path, field_name)
+                                parsed_array = self._extract_array_at_position(key)
+                                # Get the raw array string from recent_context
+                                array_str = self._extract_array_string_at_position(key)
+                                self.handler.on_field_end(path, field_name, array_str, parsed_value=parsed_array)
+                                # Clean up tracked position
+                                if key in self.array_start_pos:
+                                    del self.array_start_pos[key]
+                            
+                            self.path_stack.pop()
             
             # Accumulate content if we're inside a value
             elif self.in_value:
                 # Store raw character in buffer
                 self.buffer += char
                 # Send to handler for streaming (escape handling is done above)
-                path = '/' + '/'.join([name for name, bracket in self.path_stack]) if self.path_stack else ''
+                path = self._get_path_from_stack()
                 self.handler.on_value_chunk(path, self.current_field, char)
             elif self.in_field_name:
                 self.buffer += char
@@ -359,6 +413,122 @@ class StreamingJSONParser:
                 return None
         return None
     
+    def _extract_last_complete_array(self):
+        """
+        Extract the last complete JSON array from recent_context.
+        Returns the parsed list or None if extraction fails.
+        """
+        # Search backwards for the last complete [...] array
+        bracket_count = 0
+        start_pos = -1
+        
+        for i in range(len(self.recent_context) - 1, -1, -1):
+            ch = self.recent_context[i]
+            if ch == ']':
+                bracket_count += 1
+            elif ch == '[':
+                bracket_count -= 1
+                if bracket_count == 0:
+                    start_pos = i
+                    break
+        
+        if start_pos >= 0:
+            # Try to find where this array ends
+            bracket_count = 0
+            end_pos = start_pos
+            in_string = False
+            escape_next = False
+            
+            for i in range(start_pos, len(self.recent_context)):
+                ch = self.recent_context[i]
+                
+                # Handle string boundaries and escaping
+                if escape_next:
+                    escape_next = False
+                    continue
+                
+                if ch == '\\':
+                    escape_next = True
+                    continue
+                
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                
+                # Only count brackets when not in a string
+                if not in_string:
+                    if ch == '[':
+                        bracket_count += 1
+                    elif ch == ']':
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_pos = i + 1
+                            break
+            
+            json_str = self.recent_context[start_pos:end_pos]
+            try:
+                return json_module.loads(json_str)
+            except Exception:
+                return None
+        return None
+    
+    def _extract_last_array_string(self):
+        """
+        Extract the last complete array as a string (without outer brackets).
+        Returns the array content as a string or empty string if extraction fails.
+        """
+        # Search backwards for the last complete [...] array
+        bracket_count = 0
+        start_pos = -1
+        
+        for i in range(len(self.recent_context) - 1, -1, -1):
+            ch = self.recent_context[i]
+            if ch == ']':
+                bracket_count += 1
+            elif ch == '[':
+                bracket_count -= 1
+                if bracket_count == 0:
+                    start_pos = i
+                    break
+        
+        if start_pos >= 0:
+            # Try to find where this array ends
+            bracket_count = 0
+            end_pos = start_pos
+            in_string = False
+            escape_next = False
+            
+            for i in range(start_pos, len(self.recent_context)):
+                ch = self.recent_context[i]
+                
+                # Handle string boundaries and escaping
+                if escape_next:
+                    escape_next = False
+                    continue
+                
+                if ch == '\\':
+                    escape_next = True
+                    continue
+                
+                if ch == '"':
+                    in_string = not in_string
+                    continue
+                
+                # Only count brackets when not in a string
+                if not in_string:
+                    if ch == '[':
+                        bracket_count += 1
+                    elif ch == ']':
+                        bracket_count -= 1
+                        if bracket_count == 0:
+                            end_pos = i + 1
+                            break
+            
+            # Return the content without the outer brackets
+            json_str = self.recent_context[start_pos+1:end_pos-1] if end_pos > start_pos + 1 else ""
+            return json_str
+        return ""
+    
     def parse_from_old_new(self, old_text, new_text):
         """
         Convenience method that calculates the delta between old and new text.
@@ -372,3 +542,109 @@ class StreamingJSONParser:
         
         delta = new_text[len(old_text):]
         self.parse_incremental(delta)
+    
+    def _extract_array_at_position(self, key):
+        """
+        Extract array at a specific tracked position.
+        
+        Args:
+            key: Tuple of (path, field_name) identifying the array
+        
+        Returns:
+            Parsed list or None if extraction fails
+        """
+        if key not in self.array_start_pos:
+            # Fallback to the old method if position not tracked
+            return self._extract_last_complete_array()
+        
+        start_pos = self.array_start_pos[key]
+        
+        # Find where this array ends (current position should be at the closing ])
+        bracket_count = 0
+        end_pos = len(self.recent_context)
+        in_string = False
+        escape_next = False
+        
+        for i in range(start_pos, len(self.recent_context)):
+            ch = self.recent_context[i]
+            
+            # Handle string boundaries and escaping
+            if escape_next:
+                escape_next = False
+                continue
+            
+            if ch == '\\':
+                escape_next = True
+                continue
+            
+            if ch == '"':
+                in_string = not in_string
+                continue
+            
+            # Only count brackets when not in a string
+            if not in_string:
+                if ch == '[':
+                    bracket_count += 1
+                elif ch == ']':
+                    bracket_count -= 1
+                    if bracket_count == 0:
+                        end_pos = i + 1
+                        break
+        
+        json_str = self.recent_context[start_pos:end_pos]
+        try:
+            return json_module.loads(json_str)
+        except Exception:
+            return None
+    
+    def _extract_array_string_at_position(self, key):
+        """
+        Extract array content (without brackets) at a specific tracked position.
+        
+        Args:
+            key: Tuple of (path, field_name) identifying the array
+        
+        Returns:
+            Array content as string or empty string if extraction fails
+        """
+        if key not in self.array_start_pos:
+            # Fallback to the old method if position not tracked
+            return self._extract_last_array_string()
+        
+        start_pos = self.array_start_pos[key]
+        
+        # Find where this array ends
+        bracket_count = 0
+        end_pos = len(self.recent_context)
+        in_string = False
+        escape_next = False
+        
+        for i in range(start_pos, len(self.recent_context)):
+            ch = self.recent_context[i]
+            
+            # Handle string boundaries and escaping
+            if escape_next:
+                escape_next = False
+                continue
+            
+            if ch == '\\':
+                escape_next = True
+                continue
+            
+            if ch == '"':
+                in_string = not in_string
+                continue
+            
+            # Only count brackets when not in a string
+            if not in_string:
+                if ch == '[':
+                    bracket_count += 1
+                elif ch == ']':
+                    bracket_count -= 1
+                    if bracket_count == 0:
+                        end_pos = i + 1
+                        break
+        
+        # Return the content without the outer brackets
+        json_str = self.recent_context[start_pos+1:end_pos-1] if end_pos > start_pos + 1 else ""
+        return json_str
