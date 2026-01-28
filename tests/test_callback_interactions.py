@@ -143,31 +143,35 @@ def test_multiple_value_chunks_between_start_and_end():
     assert len(chunk_events) == 10  # 10 characters
 
 
-def test_no_field_start_for_non_string_primitives():
-    """Test that field_start is not called for non-string primitive values."""
+def test_field_start_for_all_value_types():
+    """Test that field_start is called for all value types including primitives."""
     data = {
         "string": "text",
         "number": 42,
         "boolean": True,
-        "null": None
+        "null": None,
+        "object": {"key": "value"},
+        "array": [1, 2, 3]
     }
     json_str = json.dumps(data)
-    
+
     field_starts = []
-    
+
     class EventTracker(JSONParserHandler):
         def on_field_start(self, path, field_name):
             field_starts.append(field_name)
-    
+
     handler = EventTracker()
     parser = StreamingJSONParser(handler)
     parser.parse_incremental(json_str)
-    
-    # Only string should have field_start
+
+    # All value types should have field_start
     assert 'string' in field_starts
-    assert 'number' not in field_starts
-    assert 'boolean' not in field_starts
-    assert 'null' not in field_starts
+    assert 'number' in field_starts
+    assert 'boolean' in field_starts
+    assert 'null' in field_starts
+    assert 'object' in field_starts
+    assert 'array' in field_starts
 
 
 def test_field_start_for_object_and_array_fields():
