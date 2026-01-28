@@ -108,6 +108,31 @@ class Tracker:
         """
         return self._path_stack and self._path_stack[-1][1] == '['
 
+    def at_object_level(self) -> bool:
+        """
+        Check if we're at an object level in the path stack.
+
+        This is true when path_stack has entries and the top entry
+        represents an object (bracket_type == '{').
+        """
+        return self._path_stack and self._path_stack[-1][1] == '{'
+
+    def has_brackets(self) -> bool:
+        """Check if bracket stack is not empty."""
+        return bool(self._bracket_stack)
+
+    def is_object_in_array(self) -> bool:
+        """Check if we're an object directly inside an array.
+
+        This is true when the bracket_stack has at least 2 entries,
+        the top is '{' (we're closing an object), and the one below is '['.
+        """
+        return (
+            len(self._bracket_stack) >= 2 and
+            self._bracket_stack[-1] == '{' and
+            self._bracket_stack[-2] == '['
+        )
+
     def get_path(self, slice_index: int = None) -> str:
         """
         Get path string from path_stack.
