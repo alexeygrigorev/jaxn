@@ -41,11 +41,17 @@ class RootState(ParserState):
         if char in ' \t\n\r':
             return
         if char == '{':
-            self.parser._bracket_stack.append('{')
-            self.parser._transition(InObjectWaitState(self.parser))
+            self._handle_open_brace()
         elif char == '[':
-            self.parser._bracket_stack.append('[')
-            self.parser._transition(InArrayWaitState(self.parser))
+            self._handle_open_bracket()
+
+    def _handle_open_brace(self) -> None:
+        self.parser._bracket_stack.append('{')
+        self.parser._transition(InObjectWaitState(self.parser))
+
+    def _handle_open_bracket(self) -> None:
+        self.parser._bracket_stack.append('[')
+        self.parser._transition(InArrayWaitState(self.parser))
 
 
 class FieldNameState(ParserState):
@@ -55,17 +61,22 @@ class FieldNameState(ParserState):
 
     def handle(self, char: str) -> None:
         if char == '\\':
-            self.parser._transition(EscapeState(self.parser))
+            self._handle_escape()
         elif char == '"':
-            # Field name complete
-            try:
-                self.parser._field_name = json_module.loads('"' + self.parser._buffer + '"')
-            except:
-                self.parser._field_name = self.parser._buffer
-            self.parser._buffer = ""
-            self.parser._transition(AfterFieldNameState(self.parser))
+            self._handle_end_quote()
         else:
             self.parser._buffer += char
+
+    def _handle_escape(self) -> None:
+        self.parser._transition(EscapeState(self.parser))
+
+    def _handle_end_quote(self) -> None:
+        try:
+            self.parser._field_name = json_module.loads('"' + self.parser._buffer + '"')
+        except:
+            self.parser._field_name = self.parser._buffer
+        self.parser._buffer = ""
+        self.parser._transition(AfterFieldNameState(self.parser))
 
 
 class AfterFieldNameState(ParserState):
@@ -75,9 +86,12 @@ class AfterFieldNameState(ParserState):
 
     def handle(self, char: str) -> None:
         if char == ':':
-            self.parser._transition(AfterColonState(self.parser))
+            self._handle_colon()
         elif char not in ' \t\n\r':
             pass  # Invalid JSON, ignore
+
+    def _handle_colon(self) -> None:
+        self.parser._transition(AfterColonState(self.parser))
 
 
 class AfterColonState(ParserState):
@@ -88,32 +102,43 @@ class AfterColonState(ParserState):
     def handle(self, char: str) -> None:
         if char in ' \t\n\r':
             return
-
         if char == '"':
-            self.parser.handler.on_field_start(self.parser._get_path(), self.parser._field_name)
-            self.parser._buffer = ""
-            self.parser._transition(ValueStringState(self.parser))
+            self._handle_string_start()
         elif char == '{':
-            self.parser.handler.on_field_start(self.parser._get_path(), self.parser._field_name)
-            self.parser._path_stack.append((self.parser._field_name, '{', len(self.parser._bracket_stack)))
-            self.parser._bracket_stack.append('{')
-            self.parser._field_name = ""
-            self.parser._transition(InObjectWaitState(self.parser))
+            self._handle_object_start()
         elif char == '[':
-            path = self.parser._get_path()
-            self.parser.handler.on_field_start(path, self.parser._field_name)
-
-            key = (path, self.parser._field_name)
-            self.parser._array_starts[key] = len(self.parser._recent_context) - 1
-
-            self.parser._path_stack.append((self.parser._field_name, '[', len(self.parser._bracket_stack)))
-            self.parser._bracket_stack.append('[')
-            self.parser._field_name = ""
-            self.parser._transition(InArrayWaitState(self.parser))
+            self._handle_array_start()
         elif char.isdigit() or char in 'tfn-':
-            self.parser.handler.on_field_start(self.parser._get_path(), self.parser._field_name)
-            self.parser._buffer = char
-            self.parser._transition(PrimitiveState(self.parser))
+            self._handle_primitive_start(char)
+
+    def _handle_string_start(self) -> None:
+        self.parser.handler.on_field_start(self.parser._get_path(), self.parser._field_name)
+        self.parser._buffer = ""
+        self.parser._transition(ValueStringState(self.parser))
+
+    def _handle_object_start(self) -> None:
+        self.parser.handler.on_field_start(self.parser._get_path(), self.parser._field_name)
+        self.parser._path_stack.append((self.parser._field_name, '{', len(self.parser._bracket_stack)))
+        self.parser._bracket_stack.append('{')
+        self.parser._field_name = ""
+        self.parser._transition(InObjectWaitState(self.parser))
+
+    def _handle_array_start(self) -> None:
+        path = self.parser._get_path()
+        self.parser.handler.on_field_start(path, self.parser._field_name)
+
+        key = (path, self.parser._field_name)
+        self.parser._array_starts[key] = len(self.parser._recent_context) - 1
+
+        self.parser._path_stack.append((self.parser._field_name, '[', len(self.parser._bracket_stack)))
+        self.parser._bracket_stack.append('[')
+        self.parser._field_name = ""
+        self.parser._transition(InArrayWaitState(self.parser))
+
+    def _handle_primitive_start(self, char: str) -> None:
+        self.parser.handler.on_field_start(self.parser._get_path(), self.parser._field_name)
+        self.parser._buffer = char
+        self.parser._transition(PrimitiveState(self.parser))
 
 
 class ValueStringState(ParserState):
@@ -123,34 +148,43 @@ class ValueStringState(ParserState):
 
     def handle(self, char: str) -> None:
         if char == '\\':
-            self.parser._transition(EscapeState(self.parser))
+            self._handle_escape()
         elif char == '"':
-            raw = self.parser._buffer
-
-            try:
-                parsed = json_module.loads('"' + raw + '"')
-            except:
-                parsed = raw
-
-            # Only call on_field_end if we're NOT in an array
-            # Strings in arrays are items, not field values
-            if not self.parser._in_array():
-                path = self.parser._get_path()
-                field = self.parser._field_name
-                self.parser.handler.on_field_end(path, field, raw, parsed_value=parsed)
-                self.parser._field_name = ""
-
-            self.parser._buffer = ""
-
-            if self.parser._in_array():
-                self.parser._transition(InArrayWaitState(self.parser))
-            else:
-                self.parser._transition(InObjectWaitState(self.parser))
+            self._handle_end_quote()
         else:
-            self.parser._buffer += char
+            self._handle_regular_char(char)
+
+    def _handle_escape(self) -> None:
+        self.parser._transition(EscapeState(self.parser))
+
+    def _handle_end_quote(self) -> None:
+        raw = self.parser._buffer
+
+        try:
+            parsed = json_module.loads('"' + raw + '"')
+        except:
+            parsed = raw
+
+        # Only call on_field_end if we're NOT in an array
+        # Strings in arrays are items, not field values
+        if not self.parser._in_array():
             path = self.parser._get_path()
-            field = self.parser._path_stack[-1][0] if self.parser._in_array() and self.parser._path_stack else self.parser._field_name
-            self.parser.handler.on_value_chunk(path, field, char)
+            field = self.parser._field_name
+            self.parser.handler.on_field_end(path, field, raw, parsed_value=parsed)
+            self.parser._field_name = ""
+
+        self.parser._buffer = ""
+
+        if self.parser._in_array():
+            self.parser._transition(InArrayWaitState(self.parser))
+        else:
+            self.parser._transition(InObjectWaitState(self.parser))
+
+    def _handle_regular_char(self, char: str) -> None:
+        self.parser._buffer += char
+        path = self.parser._get_path()
+        field = self.parser._path_stack[-1][0] if self.parser._in_array() and self.parser._path_stack else self.parser._field_name
+        self.parser.handler.on_value_chunk(path, field, char)
 
 
 class PrimitiveState(ParserState):
@@ -160,38 +194,44 @@ class PrimitiveState(ParserState):
 
     def handle(self, char: str) -> None:
         if char in ',}]\t\n\r ':
-            raw = self.parser._buffer.strip()
-
-            try:
-                parsed = json_module.loads(raw)
-            except:
-                parsed = raw
-
-            # Only call on_field_end if we're NOT in an array
-            # Primitives in arrays are items, not field values
-            if not self.parser._in_array():
-                path = self.parser._get_path()
-                field = self.parser._field_name
-                self.parser.handler.on_field_end(path, field, raw, parsed_value=parsed)
-                self.parser._field_name = ""
-
-            self.parser._buffer = ""
-
-            if char == ',':
-                if self.parser._in_array() and raw:
-                    self.parser._check_primitive_array_item_end(raw[-1])
-                if self.parser._in_array():
-                    self.parser._transition(InArrayWaitState(self.parser))
-                else:
-                    self.parser._transition(InObjectWaitState(self.parser))
-            elif char == '}':
-                self.parser._handle_close_brace()
-            elif char == ']':
-                self.parser._handle_close_bracket()
+            self._handle_value_end(char)
         elif char == '"':
             self.parser._buffer += char
         else:
             self.parser._buffer += char
+
+    def _handle_value_end(self, char: str) -> None:
+        raw = self.parser._buffer.strip()
+
+        try:
+            parsed = json_module.loads(raw)
+        except:
+            parsed = raw
+
+        # Only call on_field_end if we're NOT in an array
+        # Primitives in arrays are items, not field values
+        if not self.parser._in_array():
+            path = self.parser._get_path()
+            field = self.parser._field_name
+            self.parser.handler.on_field_end(path, field, raw, parsed_value=parsed)
+            self.parser._field_name = ""
+
+        self.parser._buffer = ""
+
+        if char == ',':
+            if self.parser._in_array() and raw:
+                self.parser._check_primitive_array_item_end(raw[-1])
+            self._transition_to_wait_state()
+        elif char == '}':
+            self.parser._handle_close_brace()
+        elif char == ']':
+            self.parser._handle_close_bracket()
+
+    def _transition_to_wait_state(self) -> None:
+        if self.parser._in_array():
+            self.parser._transition(InArrayWaitState(self.parser))
+        else:
+            self.parser._transition(InObjectWaitState(self.parser))
 
 
 class InObjectWaitState(ParserState):
@@ -203,12 +243,18 @@ class InObjectWaitState(ParserState):
         if char in ' \t\n\r':
             return
         if char == '"':
-            self.parser._buffer = ""
-            self.parser._transition(FieldNameState(self.parser))
+            self._handle_field_start()
         elif char == '}':
-            self.parser._handle_close_brace()
+            self._handle_close_brace()
         elif char == ',':
             pass  # Ready for next field
+
+    def _handle_field_start(self) -> None:
+        self.parser._buffer = ""
+        self.parser._transition(FieldNameState(self.parser))
+
+    def _handle_close_brace(self) -> None:
+        self.parser._handle_close_brace()
 
 
 class InArrayWaitState(ParserState):
@@ -220,36 +266,50 @@ class InArrayWaitState(ParserState):
         if char in ' \t\n\r':
             return
         if char == ',':
-            # Check if previous item was a primitive (string, number, boolean, null)
-            # and trigger on_array_item_end for it
-            self.parser._check_primitive_array_item_end_on_seperator()
+            self._handle_comma()
         elif char == ']':
-            # _handle_close_bracket already handles the last item
-            self.parser._handle_close_bracket()
+            self._handle_close_bracket()
         elif char == '"':
-            self.parser._buffer = ""
-            self.parser._transition(ValueStringState(self.parser))
+            self._handle_string_start()
         elif char == '{':
-            if self.parser._path_stack and self.parser._path_stack[-1][1] == '[':
-                array_field = self.parser._path_stack[-1][0]
-                path = self.parser._get_path(-1)
-                self.parser.handler.on_array_item_start(path, array_field)
-
-            self.parser._bracket_stack.append('{')
-            self.parser._path_stack.append(('', '{', len(self.parser._bracket_stack) - 1))
-            self.parser._transition(InObjectWaitState(self.parser))
+            self._handle_object_start()
         elif char == '[':
-            self.parser._bracket_stack.append('[')
-            self.parser._path_stack.append(('', '[', len(self.parser._bracket_stack) - 1))
-            self.parser._transition(InArrayWaitState(self.parser))
+            self._handle_array_start()
         elif char.isdigit() or char in 'tfn-':
-            # Fire on_field_start for primitive values in arrays
-            if self.parser._path_stack and self.parser._path_stack[-1][1] == '[':
-                array_field = self.parser._path_stack[-1][0]
-                path = self.parser._get_path(-1)
-                self.parser.handler.on_field_start(path, array_field)
-            self.parser._buffer = char
-            self.parser._transition(PrimitiveState(self.parser))
+            self._handle_primitive_start(char)
+
+    def _handle_comma(self) -> None:
+        self.parser._check_primitive_array_item_end_on_seperator()
+
+    def _handle_close_bracket(self) -> None:
+        self.parser._handle_close_bracket()
+
+    def _handle_string_start(self) -> None:
+        self.parser._buffer = ""
+        self.parser._transition(ValueStringState(self.parser))
+
+    def _handle_object_start(self) -> None:
+        if self.parser._path_stack and self.parser._path_stack[-1][1] == '[':
+            array_field = self.parser._path_stack[-1][0]
+            path = self.parser._get_path(-1)
+            self.parser.handler.on_array_item_start(path, array_field)
+
+        self.parser._bracket_stack.append('{')
+        self.parser._path_stack.append(('', '{', len(self.parser._bracket_stack) - 1))
+        self.parser._transition(InObjectWaitState(self.parser))
+
+    def _handle_array_start(self) -> None:
+        self.parser._bracket_stack.append('[')
+        self.parser._path_stack.append(('', '[', len(self.parser._bracket_stack) - 1))
+        self.parser._transition(InArrayWaitState(self.parser))
+
+    def _handle_primitive_start(self, char: str) -> None:
+        if self.parser._path_stack and self.parser._path_stack[-1][1] == '[':
+            array_field = self.parser._path_stack[-1][0]
+            path = self.parser._get_path(-1)
+            self.parser.handler.on_field_start(path, array_field)
+        self.parser._buffer = char
+        self.parser._transition(PrimitiveState(self.parser))
 
 
 class EscapeState(ParserState):
@@ -264,13 +324,11 @@ class EscapeState(ParserState):
     }
 
     def handle(self, char: str) -> None:
-        was_in_value = isinstance(self.parser._previous_state, ValueStringState)
-
         if char == 'u':
-            self.parser._unicode_buf = ""
-            self.parser._buffer += '\\u'
-            self.parser._transition(UnicodeEscapeState(self.parser))
+            self._handle_unicode_escape()
             return
+
+        was_in_value = isinstance(self.parser._previous_state, ValueStringState)
 
         self.parser._buffer += '\\' + char
 
@@ -280,6 +338,14 @@ class EscapeState(ParserState):
             field = self.parser._path_stack[-1][0] if self.parser._in_array() and self.parser._path_stack else self.parser._field_name
             self.parser.handler.on_value_chunk(path, field, decoded)
 
+        self._transition_back(was_in_value)
+
+    def _handle_unicode_escape(self) -> None:
+        self.parser._unicode_buf = ""
+        self.parser._buffer += '\\u'
+        self.parser._transition(UnicodeEscapeState(self.parser))
+
+    def _transition_back(self, was_in_value: bool) -> None:
         if was_in_value:
             self.parser._transition(ValueStringState(self.parser))
         else:
@@ -292,33 +358,36 @@ class UnicodeEscapeState(ParserState):
     name = "UNICODE_ESCAPE"
 
     def handle(self, char: str) -> None:
-        # Add the hex digit to buffer (we'll replace the whole sequence later)
         self.parser._buffer += char
         self.parser._unicode_buf += char
 
         if len(self.parser._unicode_buf) == 4:
-            try:
-                code_point = int(self.parser._unicode_buf, 16)
-                decoded = chr(code_point)
-            except:
-                decoded = None
+            self._process_escape_sequence()
 
-            # Send decoded character to handler
-            path = self.parser._get_path()
-            field = self.parser._path_stack[-1][0] if self.parser._in_array() and self.parser._path_stack else self.parser._field_name
+    def _process_escape_sequence(self) -> None:
+        try:
+            code_point = int(self.parser._unicode_buf, 16)
+            decoded = chr(code_point)
+        except:
+            decoded = None
 
-            if decoded is not None:
-                # Valid escape - send the decoded character
-                self.parser.handler.on_value_chunk(path, field, decoded)
-                # Replace the \uXXXX in buffer with the decoded character
-                self.parser._buffer = self.parser._buffer[:-6] + decoded
-            else:
-                # Invalid escape - send the original \uXXXX characters as-is
-                # We need to send \, u, and the 4 hex digits
-                self.parser.handler.on_value_chunk(path, field, '\\')
-                self.parser.handler.on_value_chunk(path, field, 'u')
-                for c in self.parser._unicode_buf:
-                    self.parser.handler.on_value_chunk(path, field, c)
+        path = self.parser._get_path()
+        field = self.parser._path_stack[-1][0] if self.parser._in_array() and self.parser._path_stack else self.parser._field_name
 
-            self.parser._unicode_buf = ""
-            self.parser._transition(ValueStringState(self.parser))
+        if decoded is not None:
+            self._handle_valid_escape(path, field, decoded)
+        else:
+            self._handle_invalid_escape(path, field)
+
+        self.parser._unicode_buf = ""
+        self.parser._transition(ValueStringState(self.parser))
+
+    def _handle_valid_escape(self, path: str, field: str, decoded: str) -> None:
+        self.parser.handler.on_value_chunk(path, field, decoded)
+        self.parser._buffer = self.parser._buffer[:-6] + decoded
+
+    def _handle_invalid_escape(self, path: str, field: str) -> None:
+        self.parser.handler.on_value_chunk(path, field, '\\')
+        self.parser.handler.on_value_chunk(path, field, 'u')
+        for c in self.parser._unicode_buf:
+            self.parser.handler.on_value_chunk(path, field, c)
