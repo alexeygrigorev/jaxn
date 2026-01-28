@@ -5,11 +5,12 @@ Parse JSON incrementally using an explicit state machine where each state
 is an object with a handle() method that processes characters.
 """
 
-from typing import Dict, List, Tuple
+from typing import Dict
 
 from .handler import JSONParserHandler
 from .context import Context
 from .extractor import JSONExtractor
+from .stack_tracker import StackTracker
 from .states import ParserState, RootState
 
 
@@ -36,12 +37,11 @@ class StreamingJSONParser:
         self._context = Context()
         self._field_name: str = ""
 
-        # Stack tracking
-        self._bracket_stack: List[str] = []
-        self._path_stack: List[Tuple[str, str, int]] = []
+        # Stack tracking - now managed by StackTracker
+        self._stacks = StackTracker()
 
         # Position tracking
-        self._array_starts: Dict[Tuple[str, str], int] = {}
+        self._array_starts: Dict[tuple, int] = {}
 
         # Extractor for pulling JSON values from context
         self._extractor = JSONExtractor(self._context)
@@ -59,6 +59,21 @@ class StreamingJSONParser:
         """Name of current state for debugging."""
         return self._state.name if self._state else "None"
 
+    # Expose stack tracker methods for backward compatibility with states
+    @property
+    def _bracket_stack(self):
+        return self._stacks.bracket_stack
+
+    @property
+    def _path_stack(self):
+        return self._stacks.path_stack
+
+    def _in_array(self):
+        return self._stacks.in_array()
+
+    def _in_object(self):
+        return self._stacks.in_object()
+
     @property
     def _recent_context(self) -> str:
         """Get the recent context string (for compatibility)."""
@@ -75,17 +90,13 @@ class StreamingJSONParser:
 
     def _get_path(self, slice_index: int = None) -> str:
         """Get path string from path_stack."""
-        stack = self._path_stack[:slice_index] if slice_index is not None else self._path_stack
-        if not stack:
-            return ''
-        names = [entry[0] for entry in stack if entry[0]]
-        return '/' + '/'.join(names)
+        return self._stacks.get_path(slice_index)
 
     def _get_field_name(self) -> str:
         """Get the current field name."""
         # If we're in an array, use the array's field name from path_stack
-        if self._in_array() and self._path_stack:
-            return self._path_stack[-1][0]
+        if self._stacks.in_array() and self._stacks.path_stack:
+            return self._stacks.path_stack[-1][0]
         # Otherwise use the current field name
         return self._field_name
 
@@ -100,12 +111,6 @@ class StreamingJSONParser:
                 for key, pos in self._array_starts.items()
                 if pos >= trim_amount
             }
-
-    def _in_array(self) -> bool:
-        return self._bracket_stack and self._bracket_stack[-1] == '['
-
-    def _in_object(self) -> bool:
-        return self._bracket_stack and self._bracket_stack[-1] == '{'
 
     def parse_incremental(self, delta: str) -> None:
         """Parse new characters incrementally."""
