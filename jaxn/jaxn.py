@@ -93,7 +93,6 @@ class StreamingJSONParser:
         self.path_stack = []  # Stack of (field_name, bracket_type, depth_when_added): e.g., [('sections', '[', 2), ('references', '[', 3)]
         self.bracket_stack = []  # Stack of just bracket types: e.g., ['{', '[', '{']
         self.pending_escape = ""  # Store backslash when we see it, to decode with next char
-        self.object_start_pos = {}  # Track start position in recent_context for each object: {(path, field): position}
         self.array_start_pos = {}  # Track start position in recent_context for each array: {(path, field): position}
         self.unicode_escape_buffer = ""  # Buffer for accumulating \uXXXX escape sequences
         self.in_unicode_escape = False  # Track if we're currently reading a \uXXXX sequence
@@ -131,7 +130,18 @@ class StreamingJSONParser:
             # Add to context (keep last 50000 chars for lookback - enough for large nested objects)
             self.recent_context += char
             if len(self.recent_context) > 50000:
+                # When trimming, adjust all tracked positions or clear them
+                trim_amount = len(self.recent_context) - 50000
                 self.recent_context = self.recent_context[-50000:]
+                
+                # Adjust or clear array start positions
+                new_array_start_pos = {}
+                for key, pos in self.array_start_pos.items():
+                    if pos >= trim_amount:
+                        # Position is still valid after trimming
+                        new_array_start_pos[key] = pos - trim_amount
+                    # Otherwise, position is lost due to trimming - don't include it
+                self.array_start_pos = new_array_start_pos
             
             # Handle unicode escape sequence continuation (\uXXXX)
             if self.in_unicode_escape:
@@ -346,10 +356,7 @@ class StreamingJSONParser:
                             # If we're closing an array, fire on_field_end
                             if char == ']' and bracket_type == '[':
                                 # Build path for the handler (parent path, not including the array being closed)
-                                if len(self.path_stack) > 1:
-                                    path = '/' + '/'.join([entry[0] if isinstance(entry, tuple) else entry for entry in self.path_stack[:-1]])
-                                else:
-                                    path = ''
+                                path = self._get_path_from_stack(self.path_stack[:-1])
                                 # Extract the complete array value using tracked position
                                 key = (path, field_name)
                                 parsed_array = self._extract_array_at_position(key)
